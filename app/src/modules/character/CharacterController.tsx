@@ -4,7 +4,7 @@ import { RigidBody, CapsuleCollider, useRapier } from '@react-three/rapier'
 import * as THREE from 'three'
 
 export interface CharacterControllerHandle {
-  teleport: () => void
+  reset: () => void
 }
 
 const SPEED = 4
@@ -23,7 +23,7 @@ export const CharacterController = forwardRef<CharacterControllerHandle>(
   useRapier()
 
   useImperativeHandle(ref, () => ({
-    teleport: () => {
+    reset: () => {
       if (!bodyRef.current) return
       bodyRef.current.setTranslation({ x: 0, y: 1, z: 0 }, true)
       bodyRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true)

@@ -30,7 +30,7 @@ export function App() {
   return (
     <div className="relative w-screen h-screen bg-black overflow-hidden">
       <div className='absolute top-0 left-0'>        
-        <Leva />
+        <Leva theme={{ sizes: { rootWidth: '380px', controlWidth: '180px' } }} />
       </div>
       <DebugPanel />
       <WorldViewer world={entry.world} slug={entry.slug} />

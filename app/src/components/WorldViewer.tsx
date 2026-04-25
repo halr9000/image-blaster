@@ -5,6 +5,7 @@ import { SplatRenderer, type SplatRendererHandle } from '../modules/splat/SplatR
 import { EnvironmentMap } from '../modules/environment/EnvironmentMap'
 import { WorldCollider } from '../modules/collider/WorldCollider'
 import { CharacterController, type CharacterControllerHandle } from '../modules/character/CharacterController'
+import { ButterflyController, type ButterflyControllerHandle } from '../modules/butterfly/ButterflyController'
 import { SceneLoader } from '../modules/scene/SceneLoader'
 import { AudioManager } from '../modules/audio/AudioManager'
 import { getSplatUrl } from '../utils/worldLoader'
@@ -16,11 +17,11 @@ const FADE_SPEED = 2.0
 function SanityFloor() {
   const showColliders = useDebugStore((s) => s.showColliders)
   return (
-    <RigidBody type="fixed" position={[0, -0.5, 0]}>
-      <CuboidCollider args={[50, 0.5, 50]} />
+    <RigidBody type="fixed" position={[0, -5, 0]}>
+      <CuboidCollider args={[50, 5, 50]} />
       {showColliders && (
         <mesh>
-          <boxGeometry args={[100, 1, 100]} />
+          <boxGeometry args={[100, 10, 100]} />
           <meshBasicMaterial color={0x0000ff} wireframe />
         </mesh>
       )}
@@ -28,9 +29,11 @@ function SanityFloor() {
   )
 }
 
+type CharHandle = CharacterControllerHandle | ButterflyControllerHandle
+
 interface TransitionDriverProps {
   splatRef: React.RefObject<SplatRendererHandle | null>
-  charRef: React.RefObject<CharacterControllerHandle | null>
+  charRef: React.RefObject<CharHandle | null>
   phaseRef: React.RefObject<'idle' | 'out' | 'in'>
   revealRef: React.RefObject<number>
   pendingWorld: React.RefObject<World | null>
@@ -59,7 +62,7 @@ function TransitionDriver({
         const s = pendingSlug.current
         pendingWorld.current = null
         pendingSlug.current = null
-        charRef.current?.teleport()
+        charRef.current?.reset()
         onSwap(w, s)
         phaseRef.current = 'in'
       }
@@ -83,7 +86,8 @@ export function WorldViewer({ world: desiredWorld, slug: desiredSlug }: Props) {
   const [activeSlug, setActiveSlug] = useState(desiredSlug)
 
   const splatRef = useRef<SplatRendererHandle>(null)
-  const charRef = useRef<CharacterControllerHandle>(null)
+  const charRef = useRef<CharHandle>(null)
+  const useButterfly = useDebugStore((s) => s.useButterflyController)
   const phaseRef = useRef<'idle' | 'out' | 'in'>('in')
   const revealRef = useRef(0)
   const pendingWorldRef = useRef<World | null>(null)
@@ -122,7 +126,11 @@ export function WorldViewer({ world: desiredWorld, slug: desiredSlug }: Props) {
             }}
           />
           <Physics gravity={[0, -9.81, 0]}>
-            <CharacterController ref={charRef} />
+            {useButterfly ? (
+              <ButterflyController ref={charRef as React.RefObject<ButterflyControllerHandle>} />
+            ) : (
+              <CharacterController ref={charRef as React.RefObject<CharacterControllerHandle>} />
+            )}
             <WorldCollider url={activeWorld.assets.mesh.collider_mesh_url} />
             <SanityFloor />
           </Physics>
