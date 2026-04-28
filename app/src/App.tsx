@@ -1,7 +1,7 @@
 import { useRoute, useLocation, Redirect } from 'wouter'
 import { Leva } from 'leva'
 import { WorldViewer } from './components/WorldViewer'
-import { WorldSidebar } from './components/WorldSidebar'
+import { BottomLeftControls } from './components/BottomLeftControls'
 import { DebugPanel } from './components/DebugPanel'
 import { TouchControls } from './components/TouchControls'
 import { loadWorlds } from './utils/worldLoader'
@@ -34,7 +34,7 @@ export function App() {
       </div>
       <DebugPanel />
       <WorldViewer world={entry.world} slug={entry.slug} />
-      <WorldSidebar worlds={worlds} activeSlug={entry.slug} />
+      <BottomLeftControls worlds={worlds} activeSlug={entry.slug} />
       <TouchControls />
     </div>
   )

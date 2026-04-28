@@ -1,22 +1,27 @@
 import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { useGLTF, useTexture } from '@react-three/drei'
+import { useGLTF, useTexture, PositionalAudio } from '@react-three/drei'
 import { SkeletonUtils } from 'three-stdlib'
 import * as THREE from 'three'
 import { useButterflyStore } from './store'
+import { useAudioReady } from './useAudioReady'
+import { useAudioStore } from '../../store/audio'
 
 const GLB_URL = '/butterfly/butterfly-loop.glb'
 const TEX_URL = '/butterfly/butterfly.png'
+const FLAP_URLS = Array.from({ length: 8 }, (_, i) => `/butterfly/sfx/moth-flap-${i + 1}.wav`)
 
 const MODEL_SCALE = 0.25
 const SPEED_SMOOTH = 6 // 1/seconds, exponential damping for measured speed
 
 interface Props {
   visible?: boolean
+  withAudio?: boolean
+  intensityRef?: React.RefObject<number>
 }
 
 export const Butterfly = forwardRef<THREE.Group, Props>(function Butterfly(
-  { visible = true },
+  { visible = true, withAudio = false, intensityRef },
   ref,
 ) {
   const { scene, animations } = useGLTF(GLB_URL)
@@ -25,6 +30,13 @@ export const Butterfly = forwardRef<THREE.Group, Props>(function Butterfly(
 
   const groupRef = useRef<THREE.Group>(null)
   useImperativeHandle(ref, () => groupRef.current as THREE.Group)
+
+  const [flapUrl] = useState(() => FLAP_URLS[Math.floor(Math.random() * FLAP_URLS.length)])
+  const [sinePhase] = useState(() => Math.random() * Math.PI * 2)
+  const audioRef = useRef<THREE.PositionalAudio>(null)
+  const audioReady = useAudioReady()
+  const flapMixRef = useRef(0)
+  const tRef = useRef(0)
 
   const lastPos = useRef(new THREE.Vector3())
   const smoothedSpeed = useRef(0)
@@ -37,6 +49,7 @@ export const Butterfly = forwardRef<THREE.Group, Props>(function Butterfly(
       transparent: true,
       alphaTest: 0.5,
       side: THREE.DoubleSide,
+      roughness: 0,
     })
     cloned.traverse((c) => {
       const mesh = c as THREE.Mesh
@@ -71,6 +84,18 @@ export const Butterfly = forwardRef<THREE.Group, Props>(function Butterfly(
     const p = useButterflyStore.getState()
     const flapMul = p.flapSpeedBase + p.flapSpeedVelScale * smoothedSpeed.current
     mixer.update(dt * speedMul * flapMul)
+
+    if (audioRef.current) {
+      tRef.current += dt
+      const intensity = Math.max(0, Math.min(1, intensityRef?.current ?? 0))
+      const k = 1 - Math.exp(-p.flapMoveLerp * dt)
+      flapMixRef.current += (intensity - flapMixRef.current) * k
+      const sine = 0.5 + 0.5 * Math.sin(tRef.current * p.flapSineFreq + sinePhase)
+      const env = 1 - p.flapSineDepth + p.flapSineDepth * sine
+      const muted = useAudioStore.getState().muted
+      audioRef.current.setVolume(muted ? 0 : flapMixRef.current * env * p.flapVolume)
+      audioRef.current.setRefDistance(p.flapRefDistance)
+    }
   })
 
   return (
@@ -78,6 +103,15 @@ export const Butterfly = forwardRef<THREE.Group, Props>(function Butterfly(
       <group scale={scale} rotation={[Math.PI * .05, Math.PI * .5, 0]}>
         <primitive object={clone} />
       </group>
+      {audioReady && withAudio && (
+        <PositionalAudio
+          ref={audioRef}
+          url={flapUrl}
+          distance={useButterflyStore.getState().flapRefDistance}
+          loop
+          autoplay
+        />
+      )}
     </group>
   )
 })

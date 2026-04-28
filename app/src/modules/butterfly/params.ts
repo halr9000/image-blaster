@@ -1,6 +1,6 @@
 import { folder } from 'leva'
 
-type Folder = 'Flight' | 'Camera' | 'Shake' | 'Flock' | 'Noise' | 'Appearance' | null
+type Folder = 'Flight' | 'Camera' | 'Shake' | 'Flock' | 'Noise' | 'Appearance' | 'Audio' | null
 
 interface NumSpec {
   value: number
@@ -17,7 +17,7 @@ interface BoolSpec {
 }
 type Spec = NumSpec | BoolSpec
 
-const FOLDER_ORDER: Exclude<Folder, null>[] = ['Flight', 'Camera', 'Shake', 'Flock', 'Noise', 'Appearance']
+const FOLDER_ORDER: Exclude<Folder, null>[] = ['Flight', 'Camera', 'Shake', 'Flock', 'Noise', 'Appearance', 'Audio']
 
 export const PARAM_SPECS = {
   paused: { value: false, folder: null, label: 'Pause Movement' },
@@ -33,8 +33,8 @@ export const PARAM_SPECS = {
   invertY: { value: true, folder: 'Camera', label: 'Invert Y' },
   minDistance: { value: 0.3, min: 0.1, max: 10, step: 0.05, folder: 'Camera' },
   maxDistance: { value: 0.8, min: 0.2, max: 50, step: 0.1, folder: 'Camera' },
-  defaultDistance: { value: 1, min: 0.1, max: 50, step: 0.05, folder: 'Camera' },
-  cameraHeightOffset: { value: 0.1, min: -2, max: 2, step: 0.01, folder: 'Camera' },
+  defaultDistance: { value: 0.5, min: 0.1, max: 50, step: 0.05, folder: 'Camera' },
+  cameraHeightOffset: { value: 0, min: -2, max: 2, step: 0.01, folder: 'Camera' },
   zoomSpeed: { value: 1.0, min: 0.1, max: 5, step: 0.05, folder: 'Camera' },
   zoomLerp: { value: 8, min: 0.5, max: 30, step: 0.5, folder: 'Camera' },
   nearFov: { value: 60, min: 10, max: 120, step: 0.5, folder: 'Camera' },
@@ -54,11 +54,11 @@ export const PARAM_SPECS = {
   shakeFreqFar: { value: 0.8, min: 0.1, max: 30, step: 0.1, folder: 'Shake' },
 
   boidCount: { value: 15, min: 1, max: 100, step: 1, folder: 'Flock' },
-  neighborRadius: { value: 0.25, min: 0.01, max: 2, step: 0.01, folder: 'Flock' },
-  separationRadius: { value: 0.08, min: 0.01, max: 5, step: 0.01, folder: 'Flock' },
-  maxSpeed: { value: 0.5, min: 0.05, max: 3, step: 0.05, folder: 'Flock' },
-  attractionWeight: { value: 5, min: 0, max: 20, step: 0.05, folder: 'Flock' },
-  separationWeight: { value: 3, min: 0, max: 20, step: 0.05, folder: 'Flock' },
+  neighborRadius: { value: 0.1, min: 0.01, max: 2, step: 0.01, folder: 'Flock' },
+  separationRadius: { value: 0.15, min: 0.01, max: 5, step: 0.01, folder: 'Flock' },
+  maxSpeed: { value: 0.25, min: 0.05, max: 3, step: 0.05, folder: 'Flock' },
+  attractionWeight: { value: 3, min: 0, max: 20, step: 0.05, folder: 'Flock' },
+  separationWeight: { value: 6, min: 0, max: 20, step: 0.05, folder: 'Flock' },
   alignmentWeight: { value: 7.3, min: 0, max: 20, step: 0.05, folder: 'Flock' },
   cohesionWeight: { value: 0.1, min: 0, max: 20, step: 0.05, folder: 'Flock' },
 
@@ -71,11 +71,24 @@ export const PARAM_SPECS = {
   speedNoiseAmount: { value: 0.7, min: 0, max: 1, step: 0.01, folder: 'Noise' },
   speedNoiseFreq: { value: 0.5, min: 0.01, max: 5, step: 0.01, folder: 'Noise' },
 
-  meshSize: { value: 1.0, min: 0.05, max: 10, step: 0.05, folder: 'Appearance' },
+  meshSize: { value: 0.6, min: 0.05, max: 10, step: 0.05, folder: 'Appearance' },
   spawnJitter: { value: 0.2, min: 0, max: 10, step: 0.1, folder: 'Appearance' },
+  rotationLerp: { value: 25, min: 1, max: 100, step: 0.5, folder: 'Appearance' },
 
   flapSpeedBase: { value: 1.0, min: 0, max: 10, step: 0.05, folder: 'Appearance' },
   flapSpeedVelScale: { value: 0.5, min: 0, max: 10, step: 0.05, folder: 'Appearance' },
+
+  flapVolume: { value: 0.6, min: 0, max: 2, step: 0.01, folder: 'Audio' },
+  flapRefDistance: { value: 0.5, min: 0.05, max: 10, step: 0.05, folder: 'Audio' },
+  flapMoveLerp: { value: 4, min: 0.1, max: 30, step: 0.1, folder: 'Audio' },
+  flapSineFreq: { value: 1.8, min: 0.05, max: 10, step: 0.05, folder: 'Audio' },
+  flapSineDepth: { value: 0.6, min: 0, max: 1, step: 0.01, folder: 'Audio' },
+  windVolume: { value: 0.35, min: 0, max: 2, step: 0.01, folder: 'Audio' },
+  windLerpSpeed: { value: 3, min: 0.1, max: 30, step: 0.1, folder: 'Audio' },
+  windAngularThreshold: { value: 1.5, min: 0.1, max: 10, step: 0.05, folder: 'Audio' },
+  windSineFreq: { value: 1.2, min: 0.05, max: 10, step: 0.05, folder: 'Audio' },
+  windSineDepth: { value: 0.7, min: 0, max: 1, step: 0.01, folder: 'Audio' },
+  ambientVolume: { value: 0.5, min: 0, max: 2, step: 0.01, folder: 'Audio' },
 } as const satisfies Record<string, Spec>
 
 type Widen<T> = T extends boolean ? boolean : T extends number ? number : T

@@ -13,6 +13,7 @@ export interface BoidsFlockHandle {
 interface Props {
   targetRef: React.RefObject<THREE.Vector3>
   centroidRef?: React.RefObject<THREE.Vector3>
+  intensityRef?: React.RefObject<number>
 }
 
 const _v = new THREE.Vector3()
@@ -26,9 +27,10 @@ const _lookTarget = new THREE.Vector3()
 const _up = new THREE.Vector3(0, 1, 0)
 const _identityQuat = new THREE.Quaternion()
 const _scaleVec = new THREE.Vector3()
+const _targetQuat = new THREE.Quaternion()
 
 export const BoidsFlock = forwardRef<BoidsFlockHandle, Props>(function BoidsFlock(
-  { targetRef, centroidRef },
+  { targetRef, centroidRef, intensityRef },
   ref,
 ) {
   const groupRefs = useRef<(THREE.Group | null)[]>([])
@@ -195,7 +197,9 @@ export const BoidsFlock = forwardRef<BoidsFlockHandle, Props>(function BoidsFloc
           _v.set(nxPos, nyPos, nzPos)
           _lookTarget.set(nxPos + vx, nyPos + vy, nzPos + vz)
           _matrix.lookAt(_v, _lookTarget, _up)
-          g.quaternion.setFromRotationMatrix(_matrix)
+          _targetQuat.setFromRotationMatrix(_matrix)
+          const k = 1 - Math.exp(-p.rotationLerp * dt)
+          g.quaternion.slerp(_targetQuat, k)
         }
         g.scale.setScalar(p.meshSize)
         g.visible = true
@@ -275,6 +279,8 @@ export const BoidsFlock = forwardRef<BoidsFlockHandle, Props>(function BoidsFloc
         {Array.from({ length: MAX_BOIDS }, (_, i) => (
           <Butterfly
             key={i}
+            withAudio={i < 3}
+            intensityRef={intensityRef}
             ref={(g) => {
               groupRefs.current[i] = g
             }}

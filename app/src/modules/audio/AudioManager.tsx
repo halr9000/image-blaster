@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react'
+import { useAudioStore } from '../../store/audio'
 
 const AUDIO_EXTENSIONS = ['.mp3', '.ogg', '.wav', '.m4a']
+const BASE_VOLUME = 0.6
 
 interface Props {
   slug: string
@@ -30,10 +32,11 @@ export function AudioManager({ slug, active }: Props) {
         const files = (manifest.audio ?? []).filter((f) =>
           AUDIO_EXTENSIONS.some((ext) => f.endsWith(ext)),
         )
+        const initialMuted = useAudioStore.getState().muted
         audioRefs.current = files.map((file) => {
           const audio = new Audio(`/worlds/${slug}/output/${file}`)
           audio.loop = true
-          audio.volume = 0.6
+          audio.volume = initialMuted ? 0 : BASE_VOLUME
           audio.play().catch(() => {/* autoplay blocked */})
           return audio
         })
@@ -48,6 +51,15 @@ export function AudioManager({ slug, active }: Props) {
       audioRefs.current = []
     }
   }, [slug, active])
+
+  useEffect(() => {
+    const unsub = useAudioStore.subscribe((s) => {
+      audioRefs.current.forEach((a) => {
+        a.volume = s.muted ? 0 : BASE_VOLUME
+      })
+    })
+    return unsub
+  }, [])
 
   return null
 }

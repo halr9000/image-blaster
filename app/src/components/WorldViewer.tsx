@@ -2,17 +2,19 @@ import { Suspense, useRef, useEffect, useState } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { Physics, RigidBody, CuboidCollider } from '@react-three/rapier'
 import { SplatRenderer, type SplatRendererHandle } from '../modules/splat/SplatRenderer'
-import { EnvironmentMap } from '../modules/environment/EnvironmentMap'
+import { EnvironmentMap, type EnvironmentMapHandle } from '../modules/environment/EnvironmentMap'
 import { WorldCollider } from '../modules/collider/WorldCollider'
 import { CharacterController, type CharacterControllerHandle } from '../modules/character/CharacterController'
 import { ButterflyController, type ButterflyControllerHandle } from '../modules/butterfly/ButterflyController'
 import { SceneLoader } from '../modules/scene/SceneLoader'
 import { AudioManager } from '../modules/audio/AudioManager'
+import { PostProcessing } from '../modules/postprocessing/PostProcessing'
 import { getSplatUrl } from '../utils/worldLoader'
 import { useDebugStore } from '../store/debug'
 import type { World } from '../types/world'
 
-const FADE_SPEED = 2.0
+const FADE_DURATION = 0.0
+const FADE_SPEED = FADE_DURATION > 0 ? 1 / FADE_DURATION : Infinity
 
 function SanityFloor() {
   const showColliders = useDebugStore((s) => s.showColliders)
@@ -33,6 +35,7 @@ type CharHandle = CharacterControllerHandle | ButterflyControllerHandle
 
 interface TransitionDriverProps {
   splatRef: React.RefObject<SplatRendererHandle | null>
+  envRef: React.RefObject<EnvironmentMapHandle | null>
   charRef: React.RefObject<CharHandle | null>
   phaseRef: React.RefObject<'idle' | 'out' | 'in'>
   revealRef: React.RefObject<number>
@@ -43,6 +46,7 @@ interface TransitionDriverProps {
 
 function TransitionDriver({
   splatRef,
+  envRef,
   charRef,
   phaseRef,
   revealRef,
@@ -54,9 +58,14 @@ function TransitionDriver({
     const splat = splatRef.current
     if (!splat) return
 
+    const apply = (amount: number) => {
+      splat.setReveal(amount)
+      envRef.current?.setIntensity(amount)
+    }
+
     if (phaseRef.current === 'out') {
       revealRef.current = Math.max(0, revealRef.current - delta * FADE_SPEED)
-      splat.setReveal(revealRef.current)
+      apply(revealRef.current)
       if (revealRef.current <= 0 && pendingWorld.current && pendingSlug.current) {
         const w = pendingWorld.current
         const s = pendingSlug.current
@@ -68,7 +77,7 @@ function TransitionDriver({
       }
     } else if (phaseRef.current === 'in') {
       revealRef.current = Math.min(1, revealRef.current + delta * FADE_SPEED)
-      splat.setReveal(revealRef.current)
+      apply(revealRef.current)
       if (revealRef.current >= 1) phaseRef.current = 'idle'
     }
   })
@@ -86,6 +95,7 @@ export function WorldViewer({ world: desiredWorld, slug: desiredSlug }: Props) {
   const [activeSlug, setActiveSlug] = useState(desiredSlug)
 
   const splatRef = useRef<SplatRendererHandle>(null)
+  const envRef = useRef<EnvironmentMapHandle>(null)
   const charRef = useRef<CharHandle>(null)
   const useButterfly = useDebugStore((s) => s.useButterflyController)
   const phaseRef = useRef<'idle' | 'out' | 'in'>('in')
@@ -115,6 +125,7 @@ export function WorldViewer({ world: desiredWorld, slug: desiredSlug }: Props) {
         <Suspense fallback={null}>
           <TransitionDriver
             splatRef={splatRef}
+            envRef={envRef}
             charRef={charRef}
             phaseRef={phaseRef}
             revealRef={revealRef}
@@ -135,8 +146,9 @@ export function WorldViewer({ world: desiredWorld, slug: desiredSlug }: Props) {
             <SanityFloor />
           </Physics>
           <SplatRenderer ref={splatRef} url={splatUrl} groundPlaneOffset={ground_plane_offset} />
-          <EnvironmentMap panoUrl={activeWorld.assets.imagery.pano_url} />
+          <EnvironmentMap ref={envRef} panoUrl={activeWorld.assets.imagery.pano_url} />
           <SceneLoader slug={activeSlug} />
+          <PostProcessing />
         </Suspense>
       </Canvas>
     </>

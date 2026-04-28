@@ -10,6 +10,8 @@ import * as THREE from 'three'
 import { useButterflyInput } from './useButterflyInput'
 import { OrbitCamera } from './OrbitCamera'
 import { BoidsFlock, type BoidsFlockHandle } from './BoidsFlock'
+import { AmbientAudio } from './AmbientAudio'
+import { WindAudio } from './WindAudio'
 import { useButterflyStore } from './store'
 
 interface MarkerProps {
@@ -67,6 +69,11 @@ export const ButterflyController = forwardRef<ButterflyControllerHandle>(
     const pivotPos = useRef(new THREE.Vector3())
     const flockCentroid = useRef(new THREE.Vector3())
     const cameraPosRef = useRef(new THREE.Vector3())
+    const moveIntensityRef = useRef(0)
+    const angularIntensityRef = useRef(0)
+    const prevYawRef = useRef(0)
+    const prevPitchRef = useRef(0)
+    const prevSeededRef = useRef(false)
 
     const reset = () => {
       const params = useButterflyStore.getState()
@@ -138,6 +145,25 @@ export const ButterflyController = forwardRef<ButterflyControllerHandle>(
       body.setNextKinematicTranslation({ x: nx, y: ny, z: nz })
       targetPos.current.set(nx, ny, nz)
       cameraPosRef.current.copy(camera.position)
+
+      const inputMag = Math.min(
+        1,
+        Math.hypot(fwdAmt, rightAmt, upAmt) + Math.abs(yawAmt) * 0.5,
+      )
+      moveIntensityRef.current = inputMag
+
+      if (!prevSeededRef.current) {
+        prevYawRef.current = input.yaw.current
+        prevPitchRef.current = input.pitch.current
+        prevSeededRef.current = true
+      }
+      const dy = input.yaw.current - prevYawRef.current
+      const dp = input.pitch.current - prevPitchRef.current
+      prevYawRef.current = input.yaw.current
+      prevPitchRef.current = input.pitch.current
+      const angSpeed = Math.hypot(dy, dp) / Math.max(dt, 1e-4)
+      const angIntensity = Math.min(1, angSpeed / Math.max(0.0001, params.windAngularThreshold))
+      angularIntensityRef.current = angIntensity
     })
 
     return (
@@ -157,12 +183,27 @@ export const ButterflyController = forwardRef<ButterflyControllerHandle>(
           )}
         </RigidBody>
         <OrbitCamera input={input} targetRef={targetPos} pivotRef={pivotPos} />
-        <BoidsFlock ref={flockRef} targetRef={targetPos} centroidRef={flockCentroid} />
+        <BoidsFlock
+          ref={flockRef}
+          targetRef={targetPos}
+          centroidRef={flockCentroid}
+          intensityRef={moveIntensityRef}
+        />
+        <AmbientAudio />
+        <WindAudio angularIntensityRef={angularIntensityRef} />
         {showDebug && (
           <>
             <DebugMarker posRef={targetPos} color={0xffff00} />
             <DebugMarker posRef={cameraPosRef} color={0xff0000} />
             <DebugMarker posRef={flockCentroid} color={0x00ff00} />
+            <mesh position={[-0.15, 1, 0]}>
+              <sphereGeometry args={[0.1, 32, 32]} />
+              <meshStandardMaterial color={0xffffff} metalness={1} roughness={0} />
+            </mesh>
+            <mesh position={[0.15, 1, 0]}>
+              <sphereGeometry args={[0.1, 32, 32]} />
+              <meshStandardMaterial color={0x808080} metalness={0} roughness={1} />
+            </mesh>
           </>
         )}
       </>
