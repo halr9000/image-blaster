@@ -16,7 +16,7 @@ if [ -d worlds ] && [ "$(ls worlds/ 2>/dev/null | wc -l | tr -d ' ')" -gt 0 ]; t
   WORLD_LIST=$(ls worlds/)
   echo "Worlds available: $(echo "$WORLD_LIST" | wc -l | tr -d ' ') — $(echo "$WORLD_LIST" | tr '\n' ' ')"
 else
-  echo "No worlds yet. Use /create-world to generate one."
+  echo "No worlds yet. Use /image-blast-project to set up a project or /image-blast-world to generate one."
 fi
 
 # --- input/ staging ---

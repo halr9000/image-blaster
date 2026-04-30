@@ -12,11 +12,11 @@ function worldsPlugin(): Plugin {
     if (!fs.existsSync(worldsDir)) return []
     return fs.readdirSync(worldsDir)
       .filter((slug) => {
-        const f = path.join(worldsDir, slug, 'world', 'world.json')
+        const f = path.join(worldsDir, slug, 'output', 'world', 'world.json')
         return fs.existsSync(f) && fs.statSync(f).isFile()
       })
       .map((slug) => {
-        const raw = fs.readFileSync(path.join(worldsDir, slug, 'world', 'world.json'), 'utf-8')
+        const raw = fs.readFileSync(path.join(worldsDir, slug, 'output', 'world', 'world.json'), 'utf-8')
         return { slug, world: JSON.parse(raw) }
       })
   }

@@ -1,10 +1,10 @@
 # IMAGE-BLAST
 
-Use this prompt/spec to uncover rich image information for downstream world and asset generation.
+Use this prompt/spec to uncover rich image information for downstream world and object generation.
 
 ## Goal
 
-For each image, produce a precise, evocative, structured analysis. Capture both literal scene contents and the less tangible qualities that future agents need: mood, atmosphere, lighting, materials, and what can be separated into rigid 3D assets.
+For each image, produce a precise, evocative, structured analysis. Capture both literal scene contents and the less tangible qualities that future agents need: mood, atmosphere, lighting, materials, and what can be separated into rigid 3D objects.
 
 ## Image Analysis Rules
 
@@ -12,8 +12,8 @@ For each image, produce a precise, evocative, structured analysis. Capture both 
 - Be concrete. Prefer visible evidence over guesses.
 - Include uncertain details only in descriptions when useful; do not invent hidden objects.
 - Deduplicate repeated objects. If many similar jars, rocks, chairs, or tools appear, represent them as one unique object with a `count_estimate`.
-- For `objects`, include only things that can be cleanly distinguished into rigid or mostly rigid assets. Avoid sky, fog, terrain, walls, floors, ceilings, whole buildings, and broad environment surfaces unless they are clearly standalone props.
-- Preserve stable object IDs if updating an existing analysis or asset manifest.
+- For `objects`, include only things that can be cleanly distinguished into rigid or mostly rigid objects. Avoid sky, fog, terrain, walls, floors, ceilings, whole buildings, and broad environment surfaces unless they are clearly standalone props.
+- Preserve stable object IDs if updating an existing analysis or object manifest.
 
 ## Per-Image JSON Shape
 
@@ -37,7 +37,7 @@ For each image, produce a precise, evocative, structured analysis. Capture both 
       "materials": ["aged metal", "glass"],
       "location_in_image": "right foreground",
       "separability": "clean",
-      "generate_as_3d_asset": true
+      "generate_as_3d_object": true
     }
   ]
 }
@@ -53,8 +53,8 @@ For each image, produce a precise, evocative, structured analysis. Capture both 
 - `visual_style`: concise style labels and rendering qualities.
 - `lighting`: include direction, softness, temperature, contrast, shadow quality, and time of day.
 - `atmosphere`: include fog, dust, haze, smoke, glow, weather, particles, or other ambient effects.
-- `objects`: unique rigid asset candidates that can be separated cleanly and generated later.
+- `objects`: unique rigid object candidates that can be separated cleanly and generated later.
 
-## Asset Extraction
+## Object Extraction
 
-After creating per-image analysis, derive `assets.json` from all objects where `generate_as_3d_asset` is `true`. Merge visually similar objects across images into one asset while preserving evidence from each source image.
+After creating per-image analysis, derive `objects.json` from all objects where `generate_as_3d_object` is `true`. Merge visually similar objects across images into one object record while preserving evidence from each source image.

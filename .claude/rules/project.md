@@ -3,8 +3,8 @@
 ## First-time setup
 
 1. Copy `.env.example` to `.env` at the project root and fill in the required keys:
-   - `WORLD_LABS_API_KEY` — required for `/create-world`
-   - `FAL_KEY` — required for `/3d-blast` FAL image and mesh generation
+   - `WORLD_LABS_API_KEY` — required for `/image-blast-world`
+   - `FAL_KEY` — required for `/image-blast-3d` FAL image and mesh generation
 2. From `app/`: run `bun install`
 3. `worlds/` and `input/` are gitignored — create them if missing: `mkdir -p worlds input`
 
@@ -12,22 +12,25 @@
 
 Invokable as slash commands. Full instructions in `.claude/skills/<name>/SKILL.md`.
 
-- `/create-world [description]` — generates a world via World Labs API, checks `input/` for source images automatically
+- `/image-blast-project [world-name or description]` — creates or inspects the canonical project envelope, writes `project.json`, and reports current state
+- `/image-blast-world [world-name] [description]` — generates a world via World Labs API using `worlds/<world>/source/` as the stable source-image location
 - `/threejs-edit [world-name] [instructions]` — add/modify/remove Three.js objects in a world's scene
-- `/image-uncover [world-name]` — deeply analyzes `input/` and `worlds/<world>/source/` images with agent image understanding, writes `image-uncover.json`, and saves or updates the approved asset manifest
-- `/3d-blast [world-name]` — reads the approved asset manifest and generates or regenerates asset images and PBR meshes using FAL-backed helper scripts; can also create one asset directly from a supplied image path
+- `/image-blast-uncover [world-name]` — deeply analyzes `input/` and `worlds/<world>/source/` images with agent image understanding, writes `image.json`, and saves or updates the approved object manifest
+- `/image-blast-3d [world-name]` — reads the approved object manifest and generates or regenerates isolated object images and PBR meshes using FAL-backed helper scripts; can also create one object directly from a supplied image path
 
 ## Working directory structure
 
 ```
 worlds/
   <world-slug>/
-    source/    User-supplied input (images, prompts). Used by /create-world as generation source.
-    world/     World Labs API output: world.json, operation.json
-    output/    Skill outputs: audio, edited images, etc. Loops in background while world is active.
-      image-uncover/ Rich image analysis: image-uncover.json
-      assets/        Asset pipeline output: assets.json plus one folder per generated asset.
-    scene/     project.json — Three.js editor App-format scene file
+    project.json  Project envelope and current state, written by /image-blast-project.
+    image.json    Rich image analysis, written by /image-blast-uncover.
+    objects.json  Approved object queue, consumed by /image-blast-3d.
+    source/       User-supplied input (images, prompts). Used as the stable source location.
+    output/
+      world/      World Labs API output: world.json, operation.json
+      <object>/   Object pipeline output: object.json plus generated images and meshes.
+    scene/        project.json — Three.js editor App-format scene file
 
 input/         Staging area for files before they're associated with a world (gitignored)
 ```
@@ -36,11 +39,12 @@ input/         Staging area for files before they're associated with a world (gi
 
 ## Key files
 
-- `worlds/<slug>/world/world.json` — World Labs world object. Required for the React app to load the world.
+- `worlds/<slug>/project.json` — centralized project state written by `/image-blast-project`.
+- `worlds/<slug>/output/world/world.json` — World Labs world object. Required for the React app to load the world.
 - `worlds/<slug>/scene/project.json` — Three.js editor scene. Written by `/threejs-edit`, loaded by the React app.
-- `worlds/<slug>/output/image-uncover/image-uncover.json` — rich image analysis written by `/image-uncover`.
-- `worlds/<slug>/output/assets/assets.json` — approved asset manifest written by `/image-uncover`, consumed by `/3d-blast`.
+- `worlds/<slug>/image.json` — rich image analysis written by `/image-blast-uncover`.
+- `worlds/<slug>/objects.json` — approved object manifest written by `/image-blast-uncover`, consumed by `/image-blast-3d`.
 
 ## `input/` staging
 
-Drop images, audio, or other assets into `input/`, then tell Claude what to do with them. Claude checks this folder automatically when running `/create-world`. After use, files move to `worlds/<slug>/source/` or `worlds/<slug>/output/`.
+Drop images, audio, or other files into `input/`, then tell Claude what to do with them. `/image-blast-project` owns moving or copying staged files into a stable project location when needed. After use, files belong under `worlds/<slug>/source/` or `worlds/<slug>/output/`.

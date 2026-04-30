@@ -16,8 +16,8 @@ The two components share a **working directory** (`worlds/`) that is not tracked
 Copy `.env.example` to `.env` and fill in the keys:
 
 ```
-WORLD_LABS_API_KEY=   # Required for /create-world
-FAL_KEY=              # Required for /3d-blast
+WORLD_LABS_API_KEY=   # Required for /image-blast-world
+FAL_KEY=              # Required for /image-blast-3d
 ```
 
 ## Commands
@@ -40,12 +40,14 @@ All skills and the React app read/write from `worlds/` (gitignored):
 ```
 worlds/
   <world-name>/
-    source/   # user-supplied input files (images, prompts, etc.)
-    world/    # create-world skill output (splat, colliders, panorama)
-    output/   # output from other skills (audio, edited images, etc.)
-      image-uncover/ # rich image analysis JSON
-      assets/ # asset manifest and generated asset images/meshes
-    scene/    # project.json — Three.js editor scene file for arbitrary objects
+    project.json # project envelope and current state
+    image.json   # rich image analysis from /image-blast-uncover
+    objects.json # approved object queue for /image-blast-3d
+    source/      # user-supplied input files (images, prompts, etc.)
+    output/
+      world/     # /image-blast-world output (world.json, operation.json)
+      <object>/  # generated object images, meshes, and object.json
+    scene/       # project.json — Three.js editor scene file for arbitrary objects
 ```
 
 **`scene/project.json`** is the mechanism for arbitrary objects in a world. It uses the Three.js editor's native format (`metadata.type: "App"`, wrapping `THREE.ObjectLoader`-compatible `scene` and `camera` objects as plain JSON). Claude writes objects into it via the `threejs-edit` skill; the Three.js editor can open, modify, and save the same file directly. The React app loads it on world load using `THREE.ObjectLoader` and mounts the objects into the R3F scene. This is the shared contract between Claude and the editor.
@@ -54,19 +56,19 @@ worlds/
 
 Skills are Claude Code skills per https://code.claude.com/docs/en/skills. Each skill lives at `.claude/skills/<skill-name>/SKILL.md` and is invokable as `/<skill-name>`. Shared world structure context is in `.claude/rules/project.md` (auto-loaded every session).
 
-**`/create-world [description]`** — Checks `input/` for source images, then calls the World Labs API (https://docs.worldlabs.ai/), polls until complete, and writes artifacts to `worlds/<name>/world/world.json`. Runs in a forked subagent so the 5-minute poll doesn't block conversation.
+**`/image-blast-project [world-name or description]`** — Creates or inspects the canonical `worlds/<name>/` project envelope, writes `project.json`, reports state, and recommends next actions.
+
+**`/image-blast-world [world-name] [description]`** — Ensures the project envelope exists, then calls the World Labs API (https://docs.worldlabs.ai/), polls until complete, and writes artifacts to `worlds/<name>/output/world/world.json`. Runs in a forked subagent so the 5-minute poll doesn't block conversation.
 
 **`/threejs-edit [world-name] [instructions]`** — Reads and writes `worlds/<name>/scene/project.json` to add or modify Three.js objects in a world's scene.
 
-**`/image-uncover [world-name]`** — Scans images in `input/` and `worlds/<name>/source/`, uses agent image understanding to write rich scene analysis to `worlds/<name>/output/image-uncover/image-uncover.json`, and saves or updates the approved asset manifest at `worlds/<name>/output/assets/assets.json`.
+**`/image-blast-uncover [world-name]`** — Scans images in `input/` and `worlds/<name>/source/`, uses agent image understanding to write rich scene analysis to `worlds/<name>/image.json`, and saves or updates the approved object manifest at `worlds/<name>/objects.json`.
 
-**`/3d-blast [world-name]`** — Reads `worlds/<name>/output/assets/assets.json` and generates or regenerates assets under `worlds/<name>/output/assets/<asset-id>/` using FAL-backed helper scripts for Nano Banana image isolation and Hunyuan 3D PBR mesh generation. It can also create a single asset directly from a supplied image path and description.
+**`/image-blast-3d [world-name]`** — Reads `worlds/<name>/objects.json` and generates or regenerates objects under `worlds/<name>/output/<object-id>/` using FAL-backed helper scripts for image isolation and Hunyuan 3D PBR mesh generation. It can also create a single object directly from a supplied image path and description.
 
-Asset API calls are implementation scripts under `.claude/scripts/asset-pipeline/`, not standalone slash-command skills. The workflow skills document when and how Claude should call those scripts.
+FAL API calls are implementation scripts under `.claude/scripts/asset-pipeline/`, not standalone slash-command skills. The workflow skills document when and how Claude should call those scripts.
 
 **`input/` staging** — Drop images or other assets into `input/` (gitignored), then ask Claude what to do with them. Claude will check this folder automatically when creating worlds or processing assets.
-
-**`image-editing`** — TBD.
 
 ### React Viewer (`app/`)
 
