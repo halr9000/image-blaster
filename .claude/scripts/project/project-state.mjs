@@ -19,6 +19,7 @@ import {
 
 const PROJECT_DIRS = ["source", "output", "output/world", "output/sfx", "scene"];
 const RESERVED_OUTPUT_DIRS = new Set(["world", "sfx"]);
+const MODEL_EXTENSIONS = new Set([".glb", ".obj", ".fbx", ".usdz"]);
 const STAGE_EXTENSIONS = new Set([
   ".avif",
   ".gif",
@@ -43,16 +44,14 @@ function displayNameFromSlug(slug) {
     .join(" ");
 }
 
-async function listFiles(dirPath) {
+async function listDirFiles(dirPath) {
   if (!(await pathExists(dirPath))) return [];
 
   const files = [];
   const entries = await readdir(dirPath, { withFileTypes: true });
   for (const entry of entries) {
     const fullPath = path.join(dirPath, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await listFiles(fullPath)));
-    } else if (entry.isFile()) {
+    if (entry.isFile()) {
       files.push(fullPath);
     }
   }
@@ -130,13 +129,20 @@ async function scanObjects(worldDir) {
     if (!objectJson) continue;
 
     const object = objectJson.object || objectJson;
+    const objectFiles = await listDirFiles(objectDir);
+    const hasModel = objectFiles.some((filePath) =>
+      isVisibleFile(filePath) && MODEL_EXTENSIONS.has(path.extname(filePath).toLowerCase())
+    );
+    const sfxDir = path.join(objectDir, "sfx");
+    const hasSfx = (await listDirFiles(sfxDir)).some(isVisibleGeneratedFile);
+
     objects.push({
       id: object.id || entry.name,
       name: object.name || entry.name,
-      status: object.status || "pending",
+      status: hasModel ? "completed" : "pending",
       working_dir: object.working_dir || objectDir,
       object_json: objectPath,
-      has_sfx: await pathExists(path.join(objectDir, "sfx", "sfx.json")),
+      has_sfx: hasSfx,
       updated_at: objectJson.updated_at
     });
   }
@@ -145,9 +151,9 @@ async function scanObjects(worldDir) {
 }
 
 function objectCounts(objects) {
-  const counts = { pending: 0, completed: 0, failed: 0 };
-  for (const object of objects) {
-    const status = object.status || "pending";
+  const counts = { pending: 0, completed: 0 };
+  for (const summary of objects) {
+    const status = summary.status || "pending";
     if (counts[status] === undefined) counts[status] = 0;
     counts[status] += 1;
   }
@@ -193,10 +199,10 @@ export async function ensureProjectState(options) {
   const worldSfxPath = path.join(worldDir, "output", "sfx");
   const scenePath = path.join(worldDir, "scene", "project.json");
   const objects = await scanObjects(worldDir);
-  const sourceFiles = await listFiles(path.join(worldDir, "source"));
+  const sourceFiles = await listDirFiles(path.join(worldDir, "source"));
   const sourceImageFiles = sourceFiles.filter(isSourceImage);
   const sourceAnalysisFiles = sourceFiles.filter(isSourceAnalysis);
-  const worldSfxFiles = (await listFiles(worldSfxPath)).filter(isVisibleGeneratedFile);
+  const worldSfxFiles = (await listDirFiles(worldSfxPath)).filter(isVisibleGeneratedFile);
   const objectSfxCount = objects.filter((object) => object.has_sfx).length;
 
   return {
@@ -204,9 +210,6 @@ export async function ensureProjectState(options) {
     project,
     project_json: projectPath,
     staged_files,
-    source_files: sourceFiles,
-    source_image_files: sourceImageFiles,
-    source_analysis_files: sourceAnalysisFiles,
     objects,
     paths: {
       root: worldDir,

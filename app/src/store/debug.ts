@@ -74,7 +74,7 @@ export const useDebugStore = create<DebugStore>()(
       setMotionBlurStrength: (motionBlurStrength) => set({ motionBlurStrength }),
     }),
     {
-      name: 'compendium-debug',
+      name: 'image-blaster-debug',
       version: 5,
       // Only persist things you'd want sticky across reloads. DoF and Post FX
       // values are always meant to start fresh from the defaults declared above.

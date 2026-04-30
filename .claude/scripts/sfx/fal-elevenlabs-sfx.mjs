@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import path from "node:path";
 import {
   callFalQueue,
   downloadFile,
@@ -52,8 +51,8 @@ function extensionForOutputFormat(outputFormat) {
   return ".audio";
 }
 
-async function readManifest(manifestPath) {
-  return (await pathExists(manifestPath)) ? readJson(manifestPath) : undefined;
+async function readJsonIfExists(filePath) {
+  return (await pathExists(filePath)) ? readJson(filePath) : undefined;
 }
 
 export async function generateSfx(options) {
@@ -66,8 +65,7 @@ export async function generateSfx(options) {
     durationSeconds,
     promptInfluence = 0.3,
     outputFormat = DEFAULT_OUTPUT_FORMAT,
-    kind = "sfx",
-    manifestPath = outputDir ? path.join(outputDir, "sfx.json") : undefined
+    kind = "sfx"
   } = options;
 
   if (!prompt) throw new Error("prompt is required.");
@@ -137,7 +135,7 @@ export async function generateSfx(options) {
       file: audioPath
     });
 
-    const metadata = (await readManifest(metadataPath)) || {};
+    const metadata = (await readJsonIfExists(metadataPath)) || {};
     const summary = buildRequestSummary({
       kind: "sfx",
       provider: ENDPOINT,
@@ -159,7 +157,6 @@ export async function generateSfx(options) {
     });
   }
 
-  const previous = manifestPath ? await readManifest(manifestPath) : undefined;
   const run = {
     id: new Date().toISOString(),
     kind,
@@ -170,22 +167,10 @@ export async function generateSfx(options) {
     requests
   };
 
-  const manifest = {
-    schema_version: 1,
-    updated_at: new Date().toISOString(),
-    active_requests: previous?.active_requests || [],
-    last_request_indexes: requests.map((request) => request.index),
-    last_kind: kind,
-    last_prompt: prompt
-  };
-
-  if (manifestPath) await writeJson(manifestPath, manifest);
-
   return {
     ...run,
     provider: ENDPOINT,
-    endpoint: ENDPOINT,
-    manifest_path: manifestPath
+    endpoint: ENDPOINT
   };
 }
 
@@ -209,8 +194,7 @@ async function main() {
     durationSeconds: one(flags, "duration-seconds"),
     promptInfluence: one(flags, "prompt-influence", 0.3),
     outputFormat: one(flags, "output-format", DEFAULT_OUTPUT_FORMAT),
-    kind: one(flags, "kind", "sfx"),
-    manifestPath: one(flags, "manifest")
+    kind: one(flags, "kind", "sfx")
   });
 
   console.log(JSON.stringify(result, null, 2));

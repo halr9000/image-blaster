@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "compendium",
+      "name": "image-blaster",
       "dependencies": {
         "@phosphor-icons/react": "^2.1.10",
         "@react-three/drei": "^10.7.7",

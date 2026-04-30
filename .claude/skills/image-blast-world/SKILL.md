@@ -2,7 +2,7 @@
 name: image-blast-world
 description: Generate a World Labs world for an Image Blast project. Use after /image-blast-project or /image-blast-uncover when the user wants the navigable 3D world output.
 argument-hint: [world-name] [optional world prompt or instructions]
-allowed-tools: Read Write Glob Bash(node .claude/scripts/project/project-state.mjs *) Bash(curl *) Bash(base64 *) Bash(sleep *)
+allowed-tools: Read Write Glob Bash(ls *) Bash(node .claude/scripts/project/project-state.mjs *) Bash(curl *) Bash(base64 *) Bash(sleep *)
 context: fork
 agent: general-purpose
 ---
@@ -10,6 +10,8 @@ agent: general-purpose
 Create or resume a World Labs world for project `$0`. Additional prompt text or instructions may appear in `$ARGUMENTS`.
 
 ## Instructions
+
+Follow the generic file convention in `.claude/rules/project.md`. Use `ls -a` to inspect `worlds/$0/source/` and `worlds/$0/output/world/` before reading JSON details.
 
 ### 1. Resolve project
 

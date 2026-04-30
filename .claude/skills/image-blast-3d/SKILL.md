@@ -2,7 +2,7 @@
 name: image-blast-3d
 description: Create 3D objects from output/<object>/object.json files or a direct image input. Use after /image-blast-uncover or when the user provides a single image to make into a 3D object.
 argument-hint: [world-name] [optional object-id, image path, or instructions]
-allowed-tools: Read Write Glob Bash(node .claude/scripts/project/project-state.mjs *) Bash(node .claude/scripts/asset-pipeline/generate-single-asset.mjs *) Task
+allowed-tools: Read Write Glob Bash(ls *) Bash(node .claude/scripts/project/project-state.mjs *) Bash(node .claude/scripts/asset-pipeline/generate-single-asset.mjs *) Task
 context: fork
 agent: general-purpose
 ---
@@ -10,6 +10,8 @@ agent: general-purpose
 Generate, regenerate, or directly create 3D objects for project `$0`. Additional object IDs, image paths, or instructions may appear in `$ARGUMENTS`.
 
 ## Instructions
+
+Follow the generic file convention in `.claude/rules/project.md`. Use `ls -a worlds/$0/output/<object-id>/` first for object state; read `object.json` for durable object intent and hidden request JSON only for request/resume details.
 
 1. Require a project/world slug in `$0`. If it is missing, ask which `worlds/<world-name>/` directory to process.
 2. Ensure the project envelope exists and read derived state:
@@ -30,7 +32,7 @@ node .claude/scripts/project/project-state.mjs --world "$0"
    - **Single-image mode:** create or update one object directory from the provided image path, object name, and description, then generate only that object.
    - If matching is ambiguous, show the candidate matches and ask before running paid generation.
    - If no object target and no explicit all-pending wording is present, show the pending objects and ask which object(s) to generate.
-6. Spawn one background subagent per selected object. Each subagent must run exactly one object and should write only that object's directory. For existing objects, use:
+6. Always launch one background subagent per selected object. Do not run `generate-single-asset.mjs` in the current skill agent. Each background subagent must run exactly one object, should first inspect its object directory with `ls -a`, and should write only that object's directory. For existing objects, the subagent runs:
 
 ```bash
 node .claude/scripts/asset-pipeline/generate-single-asset.mjs --world "$0" --object-id "<object-id>"
@@ -44,22 +46,15 @@ node .claude/scripts/asset-pipeline/generate-single-asset.mjs --world "$0" --ima
 
 The single-object helper calls the internal image-edit helper to create a tight studio reference image for the object, calls Hunyuan 3D with `enable_pbr: true`, downloads returned files, and writes:
 
-- `worlds/$0/output/<object-id>/object.json`
+- `worlds/$0/output/<object-id>/object.json` only for durable object intent
 - image edit result files directly in `worlds/$0/output/<object-id>/` with indexed names like `0-<object-id>.png`, `1-<object-id>.png`
 - downloaded model files in the object directory with matching indexes like `0-<object-id>.glb`
 - hidden compact request metadata beside the artifacts: `.0-<object-id>__image-request.json`, `.0-<object-id>__model-request.json`
-- active resume pointers in `object.json.jobs`
 - the same index ties together the 2D request, reference image, 3D request, and model output
 - read request `kind` from the metadata JSON, not from the filename
 
-7. After subagents finish, read each object's `object.json` directly from its directory.
-8. Refresh derived project state:
-
-```bash
-node .claude/scripts/project/project-state.mjs --world "$0"
-```
-
-9. Report completed, failed, skipped, and regenerated objects with their output directories.
+7. Return after launching the background subagents. Report the object directories and tell the user generation is continuing in background workers. Do not wait for the FAL polling commands to complete in the current skill agent.
+8. When checking results later, inspect each object directory with `ls -a` and read hidden request JSON only when request details are needed.
 
 ## Concurrency Rule
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { rename } from "node:fs/promises";
+import { readdir, rename } from "node:fs/promises";
 import path from "node:path";
 import { runHunyuan3D } from "./hunyuan-3d.mjs";
 import { runImageEdit } from "./image-edit.mjs";
@@ -25,8 +25,25 @@ import {
   requestPath
 } from "./request-metadata.mjs";
 
+const IMAGE_EXTENSIONS = new Set([".avif", ".gif", ".jpeg", ".jpg", ".png", ".webp"]);
+const MODEL_EXTENSIONS = new Set([".glb", ".obj", ".fbx", ".usdz"]);
+const GENERATED_OBJECT_FIELDS = new Set(["status"]);
+
 async function readJsonIfExists(filePath) {
   return (await pathExists(filePath)) ? readJson(filePath) : undefined;
+}
+
+async function directoryFiles(dirPath) {
+  const entries = await readdir(dirPath, { withFileTypes: true }).catch(() => []);
+  return entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.join(dirPath, entry.name));
+}
+
+function cleanObject(object, workingDir) {
+  const cleaned = { ...object, working_dir: object.working_dir || workingDir };
+  for (const field of GENERATED_OBJECT_FIELDS) delete cleaned[field];
+  return cleaned;
 }
 
 function collectSourceImages(object, directImage) {
@@ -61,13 +78,13 @@ function buildDirectObject({ objectId, objectName, description, image, world }) 
     description: description || name,
     source_images: image ? [image] : [],
     evidence: image ? [{ image, notes: "Direct single-image object input" }] : [],
-    status: "pending",
+    generate_as_3d_object: true,
     working_dir: `worlds/${world}/output/${id}`
   };
 }
 
 function buildPrompt(object) {
-  return `Create a single clean product reference image for this object only:
+  return `Create a single clean reference image for this object only:
 
 Name: ${object.name}
 Description: ${object.description}
@@ -76,7 +93,6 @@ Requirements:
 - show only this object, no surrounding scene and no extra props
 - white background, studio lighting, centered composition
 - cropped tightly while keeping the entire object visible
-- realistic material detail suitable for image-to-3D generation
 - no text, labels, hands, people, floor shadows, or duplicate objects`;
 }
 
@@ -84,16 +100,64 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function requestIndexFromState(previous) {
-  const jobIndexes = [
-    previous?.jobs?.image_edit?.index,
-    previous?.jobs?.hunyuan_3d?.index,
-    parseIndexedName(previous?.jobs?.image_edit?.metadata_path)?.index,
-    parseIndexedName(previous?.jobs?.hunyuan_3d?.metadata_path)?.index,
-    parseIndexedName(previous?.files?.reference_image)?.index
-  ].filter((index) => Number.isInteger(index));
+function statusText(value) {
+  return String(value || "").toLowerCase();
+}
 
-  return jobIndexes.at(0);
+function isCompletedRequest(request) {
+  return ["completed", "succeeded", "success"].includes(statusText(request.data?.status));
+}
+
+function isFailedRequest(request) {
+  const status = statusText(request.data?.status);
+  return Boolean(request.data?.error) || ["failed", "error", "cancelled", "canceled"].includes(status);
+}
+
+function isUsableRequest(request) {
+  return Boolean(request.data?.request_id && request.data?.endpoint) && !isFailedRequest(request);
+}
+
+function isActiveRequest(request) {
+  return isUsableRequest(request) && !isCompletedRequest(request);
+}
+
+function latestByIndex(entries) {
+  return entries
+    .filter((entry) => Number.isInteger(entry.index))
+    .sort((a, b) => b.index - a.index)
+    .at(0);
+}
+
+async function latestArtifact(dirPath, slug, extensions) {
+  const files = await directoryFiles(dirPath);
+  const artifacts = files
+    .map((filePath) => {
+      const parsed = parseIndexedName(filePath);
+      return parsed && !parsed.hidden && parsed.slug === slug && extensions.has(parsed.extension.toLowerCase())
+        ? { ...parsed, path: filePath }
+        : undefined;
+    })
+    .filter(Boolean);
+  return latestByIndex(artifacts);
+}
+
+async function requestMetadataFiles(dirPath, slug, scope) {
+  const files = await directoryFiles(dirPath);
+  const requests = [];
+
+  for (const filePath of files) {
+    const parsed = parseIndexedName(filePath);
+    if (!parsed?.hidden || parsed.slug !== slug || parsed.scope !== scope) continue;
+    const data = await readJsonIfExists(filePath);
+    if (!data) continue;
+    requests.push({
+      ...parsed,
+      path: filePath,
+      data
+    });
+  }
+
+  return requests;
 }
 
 async function resolveObject(options) {
@@ -114,7 +178,7 @@ async function resolveObject(options) {
   if (existing?.object) {
     return {
       object: {
-        ...existing.object,
+        ...cleanObject(existing.object, objectDir),
         ...(directImage
           ? {
               source_images: [...new Set([...(existing.object.source_images || []), directImage])],
@@ -126,21 +190,30 @@ async function resolveObject(options) {
           : {})
       },
       objectDir,
-      objectJsonPath,
-      previous: existing
+      objectJsonPath
     };
   }
 
   if (directObject) {
     return {
-      object: directObject,
+      object: cleanObject(directObject, objectDir),
       objectDir,
-      objectJsonPath,
-      previous: undefined
+      objectJsonPath
     };
   }
 
   throw new Error(`Object file not found: ${objectJsonPath}`);
+}
+
+async function writeObjectIntent(objectJsonPath, world, object) {
+  const state = {
+    schema_version: 1,
+    world,
+    object,
+    updated_at: nowIso()
+  };
+  await writeJson(objectJsonPath, state);
+  return state;
 }
 
 async function normalizeReferenceImage(downloadedImage, objectDir, objectId, requestIndex) {
@@ -158,7 +231,6 @@ async function normalizeReferenceImage(downloadedImage, objectDir, objectId, req
 async function normalizeModelFiles(downloadedFiles, objectDir, objectId, requestIndex) {
   const safeSlug = safeFileName(objectId);
   const seen = new Set();
-  const primaryModelExtensions = new Set([".glb", ".obj", ".fbx", ".usdz"]);
   let primaryModelUsed = false;
 
   const normalized = [];
@@ -166,7 +238,7 @@ async function normalizeModelFiles(downloadedFiles, objectDir, objectId, request
     const downloaded = downloadedFiles[index];
     const extension = path.extname(downloaded.path) || ".bin";
     const label = safeFileName(downloaded.label || `file-${index + 1}`);
-    const usePrimaryName = primaryModelExtensions.has(extension.toLowerCase()) && !primaryModelUsed;
+    const usePrimaryName = MODEL_EXTENSIONS.has(extension.toLowerCase()) && !primaryModelUsed;
     if (usePrimaryName) primaryModelUsed = true;
     const baseName =
       usePrimaryName
@@ -188,6 +260,42 @@ async function normalizeModelFiles(downloadedFiles, objectDir, objectId, request
   }
 
   return normalized;
+}
+
+async function resumeFalRequest(request, prefix, outputDir, pollIntervalMs = 5000) {
+  const status = await pollFalQueue(request.data.endpoint, request.data.request_id, {
+    statusUrl: request.data.status_url,
+    metadataPath: request.path,
+    pollIntervalMs
+  });
+  const result = await getFalQueueResult(request.data.endpoint, request.data.request_id, {
+    responseUrl: request.data.response_url,
+    metadataPath: request.path
+  });
+  const downloaded = await downloadRemoteFiles(result.data, outputDir, prefix);
+  const completedAt = nowIso();
+  const summary = buildRequestSummary({
+    kind: request.data.kind,
+    provider: request.data.provider || request.data.endpoint,
+    endpoint: request.data.endpoint,
+    metadata: {
+      index: request.data.index ?? request.index,
+      role: request.data.role,
+      sfx_kind: request.data.sfx_kind
+    },
+    requestId: request.data.request_id,
+    submittedAt: request.data.submitted_at,
+    completedAt,
+    prompt: request.data.prompt,
+    inputFiles: request.data.input_files || [],
+    outputFiles: downloaded.map((file) => file.path),
+    downloadedFiles: downloaded,
+    result: result.data,
+    extra: { queue_status: status.status }
+  });
+
+  await writeJson(request.path, summary);
+  return summary;
 }
 
 export async function generateSingleObject(options) {
@@ -212,183 +320,92 @@ export async function generateSingleObject(options) {
     description
   });
 
-  if (resolved.previous?.object?.status === "completed" && !regenerate) {
-    return {
-      ...resolved.previous,
-      skipped: true,
-      skip_reason: "Object already completed. Pass --regenerate to run it again."
-    };
-  }
-
-  const baseObject = {
-    ...resolved.object,
-    working_dir: resolved.object.working_dir || resolved.objectDir,
-    status: "in_progress"
-  };
+  const object = cleanObject(resolved.object, resolved.objectDir);
   await ensureDir(resolved.objectDir);
+  await writeObjectIntent(resolved.objectJsonPath, world, object);
 
-  const sourceImages = collectSourceImages(baseObject, directImage);
+  const sourceImages = collectSourceImages(object, directImage);
   if (sourceImages.length === 0) {
-    throw new Error(`Object ${baseObject.id} does not have source images for image editing.`);
+    throw new Error(`Object ${object.id} does not have source images for image editing.`);
   }
 
-  const existingRequestIndex = !regenerate ? requestIndexFromState(resolved.previous) : undefined;
+  const imageRequests = regenerate ? [] : await requestMetadataFiles(resolved.objectDir, object.id, "image");
+  const modelRequests = regenerate ? [] : await requestMetadataFiles(resolved.objectDir, object.id, "model");
+  const activeImageRequest = latestByIndex(imageRequests.filter(isActiveRequest));
+  const usableImageRequest = latestByIndex(imageRequests.filter(isUsableRequest));
+  const activeModelRequest = latestByIndex(modelRequests.filter(isActiveRequest));
+  const usableModelRequest = latestByIndex(modelRequests.filter(isUsableRequest));
+  const existingImage = regenerate ? undefined : await latestArtifact(resolved.objectDir, object.id, IMAGE_EXTENSIONS);
+  const existingModel = regenerate ? undefined : await latestArtifact(resolved.objectDir, object.id, MODEL_EXTENSIONS);
+
+  if (existingModel && !activeModelRequest && !regenerate) {
+    return {
+      schema_version: 1,
+      world,
+      object,
+      object_json: resolved.objectJsonPath,
+      output_dir: resolved.objectDir,
+      skipped: true,
+      skip_reason: "Model artifact already exists. Pass --regenerate to create a new generation.",
+      model: existingModel.path
+    };
+  }
+
   const requestIndex =
-    existingRequestIndex !== undefined
-      ? existingRequestIndex
-      : await nextIndex(resolved.objectDir, baseObject.id);
-  const files = regenerate
-    ? { source_images: sourceImages }
-    : { ...(resolved.previous?.files || {}), source_images: sourceImages };
+    activeModelRequest?.index ??
+    activeImageRequest?.index ??
+    existingImage?.index ??
+    usableModelRequest?.index ??
+    usableImageRequest?.index ??
+    await nextIndex(resolved.objectDir, object.id);
 
-  let state = {
-    schema_version: 1,
-    world,
-    object: baseObject,
-    jobs: regenerate ? {} : resolved.previous?.jobs || {},
-    updated_at: nowIso(),
-    files
-  };
-
-  async function saveState(patch = {}) {
-    state = {
-      ...state,
-      ...patch,
-      updated_at: nowIso()
-    };
-    await writeJson(resolved.objectJsonPath, state);
-    return state;
-  }
-
-  async function saveJob(stage, patch = {}) {
-    const job = {
-      ...(state.jobs?.[stage] || {}),
-      ...patch,
-      updated_at: nowIso()
-    };
-
-    await saveState({
-      jobs: {
-        ...(state.jobs || {}),
-        [stage]: job
-      }
-    });
-    return job;
-  }
-
-  async function resumeFalStage(stage, prefix, outputDir, pollIntervalMs = 5000) {
-    const job = state.jobs?.[stage];
-    if (!job?.endpoint || !job?.request_id) {
-      throw new Error(`Cannot resume ${stage}; missing endpoint or request_id in object.json.`);
-    }
-
-    await saveJob(stage, { status: "polling" });
-    const status = await pollFalQueue(job.endpoint, job.request_id, {
-      statusUrl: job.status_url,
-      metadataPath: job.metadata_path,
-      pollIntervalMs,
-      onStatus: async (statusPatch) => {
-        await saveJob(stage, {
-          status: statusPatch.status,
-          checked_at: statusPatch.checked_at
-        });
-      }
-    });
-    const result = await getFalQueueResult(job.endpoint, job.request_id, {
-      responseUrl: job.response_url,
-      metadataPath: job.metadata_path
-    });
-    const downloaded = await downloadRemoteFiles(result.data, outputDir, prefix);
-    const completedAt = nowIso();
-    const summary = buildRequestSummary({
-      kind: job.kind,
-      provider: job.endpoint,
-      metadata: { index: job.index },
-      requestId: job.request_id,
-      submittedAt: job.submitted_at,
-      completedAt,
-      outputFiles: downloaded.map((file) => file.path),
-      downloadedFiles: downloaded,
-      result: result.data
-    });
-
-    if (job.metadata_path) await writeJson(job.metadata_path, summary);
-    await saveJob(stage, {
-      status: "completed",
-      completed_at: completedAt,
-      output_files: summary.output_files,
-      metadata_path: job.metadata_path,
-      index: job.index,
-      kind: job.kind,
-      queue_status: status.status
-    });
-
-    return summary;
-  }
-
-  await saveState();
+  let generatedImagePath =
+    existingImage && (!activeImageRequest || existingImage.index >= activeImageRequest.index)
+      ? existingImage.path
+      : undefined;
+  let imageMetadataPath;
+  let modelMetadataPath;
+  let modelFiles = existingModel ? [existingModel.path] : [];
 
   try {
-    let generatedImagePath = state.files?.reference_image;
-    if (!generatedImagePath || !(await pathExists(generatedImagePath))) {
-      await saveState({
-        object: {
-          ...state.object,
-          status: "in_progress"
-        }
-      });
-
-      const imageEditMetadataPath = requestPath(resolved.objectDir, requestIndex, state.object.id, "image");
-      const imageEditJob = state.jobs?.image_edit;
-      const imageEdit = imageEditJob?.request_id
-        ? await resumeFalStage("image_edit", "image-edit", resolved.objectDir)
+    if (!generatedImagePath) {
+      const imageRequest =
+        activeImageRequest && activeImageRequest.index === requestIndex
+          ? activeImageRequest
+          : usableImageRequest && usableImageRequest.index === requestIndex
+            ? usableImageRequest
+            : undefined;
+      imageMetadataPath = imageRequest?.path || requestPath(resolved.objectDir, requestIndex, object.id, "image");
+      const imageEdit = imageRequest
+        ? await resumeFalRequest(imageRequest, "image-edit", resolved.objectDir)
         : await runImageEdit({
-            provider: imageEditProvider || state.object.image_edit_provider,
-            prompt: buildPrompt(state.object),
+            provider: imageEditProvider || object.image_edit_provider,
+            prompt: buildPrompt(object),
             images: sourceImages,
             outputDir: resolved.objectDir,
-            metadataPath: imageEditMetadataPath,
+            metadataPath: imageMetadataPath,
             metadata: { index: requestIndex },
             numImages: 1,
             resolution: "1K",
             aspectRatio: "1:1",
             outputFormat: "png",
-            limitGenerations: true,
-            onSubmit: async (submitted) => {
-              await saveJob("image_edit", {
-                endpoint: submitted.endpoint,
-                kind: "2d",
-                index: requestIndex,
-                request_id: submitted.request_id,
-                status: submitted.status,
-                submitted_at: submitted.submitted_at,
-                status_url: submitted.status_url,
-                response_url: submitted.response_url,
-                metadata_path: imageEditMetadataPath
-              });
-            },
-            onStatus: async (statusPatch) => {
-              await saveJob("image_edit", {
-                status: statusPatch.status,
-                checked_at: statusPatch.checked_at
-              });
-            }
+            limitGenerations: true
           });
 
       const rawGeneratedImage = firstGeneratedImage(imageEdit);
       if (!rawGeneratedImage) {
-        throw new Error(`Image edit did not return a downloadable image for ${state.object.id}.`);
+        throw new Error(`Image edit did not return a downloadable image for ${object.id}.`);
       }
 
       const generatedImage = await normalizeReferenceImage(
         rawGeneratedImage,
         resolved.objectDir,
-        state.object.id,
+        object.id,
         requestIndex
       );
       generatedImagePath = generatedImage.path;
-      const imageEditMetadata = (await readJsonIfExists(imageEditMetadataPath)) || imageEdit;
-      await writeJson(imageEditMetadataPath, {
+      const imageEditMetadata = (await readJsonIfExists(imageMetadataPath)) || imageEdit;
+      await writeJson(imageMetadataPath, {
         ...imageEditMetadata,
         kind: "2d",
         index: requestIndex,
@@ -398,131 +415,66 @@ export async function generateSingleObject(options) {
         ),
         updated_at: nowIso()
       });
-
-      await saveJob("image_edit", {
-        status: "completed",
-        completed_at: imageEdit.completed_at || nowIso(),
-        output_files: [generatedImage.path],
-        index: requestIndex,
-        kind: "2d",
-        metadata_path: imageEditMetadataPath
-      });
-      await saveState({
-        object: {
-          ...state.object,
-          status: "image_generated"
-        },
-        files: {
-          ...state.files,
-          source_images: sourceImages,
-          reference_image: generatedImage.path,
-          image_edit: imageEditMetadataPath,
-          image_edit_provider: imageEdit.provider_alias || imageEdit.provider
-        }
-      });
     }
 
-    const modelFiles = state.files?.downloaded_model_files || [];
-    const hasModelFiles =
-      modelFiles.length > 0 && (await Promise.all(modelFiles.map((file) => pathExists(file)))).every(Boolean);
-    if (!hasModelFiles) {
-      await saveState({
-        object: {
-          ...state.object,
-          status: "in_progress"
-        }
-      });
-
-      const hunyuanMetadataPath = requestPath(resolved.objectDir, requestIndex, state.object.id, "model");
-      const hunyuanJob = state.jobs?.hunyuan_3d;
-      const hunyuan = hunyuanJob?.request_id
-        ? await resumeFalStage("hunyuan_3d", "hunyuan-3d", resolved.objectDir, 10000)
+    const currentModel = regenerate ? undefined : await latestArtifact(resolved.objectDir, object.id, MODEL_EXTENSIONS);
+    if (!currentModel || activeModelRequest) {
+      const modelRequest =
+        activeModelRequest && activeModelRequest.index === requestIndex
+          ? activeModelRequest
+          : usableModelRequest && usableModelRequest.index === requestIndex
+            ? usableModelRequest
+            : undefined;
+      modelMetadataPath = modelRequest?.path || requestPath(resolved.objectDir, requestIndex, object.id, "model");
+      const hunyuan = modelRequest
+        ? await resumeFalRequest(modelRequest, "hunyuan-3d", resolved.objectDir, 10000)
         : await runHunyuan3D({
             image: generatedImagePath,
             outputDir: resolved.objectDir,
-            metadataPath: hunyuanMetadataPath,
+            metadataPath: modelMetadataPath,
             metadata: { index: requestIndex },
-            assetName: state.object.name,
+            assetName: object.name,
             enablePbr: true,
             generateType: "Normal",
-            faceCount: 500000,
-            onSubmit: async (submitted) => {
-              await saveJob("hunyuan_3d", {
-                endpoint: submitted.endpoint,
-                kind: "3d",
-                index: requestIndex,
-                request_id: submitted.request_id,
-                status: submitted.status,
-                submitted_at: submitted.submitted_at,
-                status_url: submitted.status_url,
-                response_url: submitted.response_url,
-                metadata_path: hunyuanMetadataPath
-              });
-            },
-            onStatus: async (statusPatch) => {
-              await saveJob("hunyuan_3d", {
-                status: statusPatch.status,
-                checked_at: statusPatch.checked_at
-              });
-            }
+            faceCount: 500000
           });
 
-      const modelFiles = await normalizeModelFiles(
+      const normalizedModelFiles = await normalizeModelFiles(
         hunyuan.downloaded_files || [],
         resolved.objectDir,
-        state.object.id,
+        object.id,
         requestIndex
       );
-      const hunyuanMetadata = (await readJsonIfExists(hunyuanMetadataPath)) || hunyuan;
-      await writeJson(hunyuanMetadataPath, {
+      modelFiles = normalizedModelFiles.map((file) => file.path);
+      const hunyuanMetadata = (await readJsonIfExists(modelMetadataPath)) || hunyuan;
+      await writeJson(modelMetadataPath, {
         ...hunyuanMetadata,
         kind: "3d",
         index: requestIndex,
-        output_files: modelFiles.map((file) => file.path),
-        downloaded_files: sanitizeForMetadata(modelFiles),
+        output_files: modelFiles,
+        downloaded_files: sanitizeForMetadata(normalizedModelFiles),
         updated_at: nowIso()
       });
-
-      await saveJob("hunyuan_3d", {
-        status: "completed",
-        completed_at: hunyuan.completed_at || nowIso(),
-        output_files: modelFiles.map((file) => file.path),
-        index: requestIndex,
-        kind: "3d",
-        metadata_path: hunyuanMetadataPath
-      });
-      await saveState({
-        files: {
-          ...state.files,
-          hunyuan_3d: hunyuanMetadataPath,
-          downloaded_model_files: modelFiles.map((file) => file.path)
-        }
-      });
+    } else {
+      modelFiles = [currentModel.path];
     }
 
-    const completed = await saveState({
-      object: {
-        ...state.object,
-        status: "completed"
-      },
-      completed_at: nowIso(),
-      files: {
-        ...state.files,
-        source_images: sourceImages
-      }
-    });
-
-    return completed;
+    return {
+      schema_version: 1,
+      world,
+      object,
+      object_json: resolved.objectJsonPath,
+      output_dir: resolved.objectDir,
+      reference_image: generatedImagePath,
+      model_files: modelFiles,
+      request_metadata: [imageMetadataPath, modelMetadataPath].filter(Boolean)
+    };
   } catch (error) {
-    const failed = await saveState({
-      object: {
-        ...state.object,
-        status: "failed"
-      },
-      failed_at: nowIso(),
-      error: error.message
+    throw Object.assign(error, {
+      object,
+      object_json: resolved.objectJsonPath,
+      output_dir: resolved.objectDir
     });
-    throw Object.assign(error, { objectState: failed });
   }
 }
 

@@ -2,12 +2,14 @@
 name: image-blast-uncover
 description: Deeply analyze source images into literal scene and object descriptions. Use when the user wants image understanding, scene captions, atmosphere, source image JSON files, object directories, or 3D object candidates.
 argument-hint: [world-name] [optional image paths or instructions]
-allowed-tools: Read Write Glob Bash(node .claude/scripts/project/project-state.mjs *)
+allowed-tools: Read Write Glob Bash(ls *) Bash(node .claude/scripts/project/project-state.mjs *)
 ---
 
 Uncover literal image information for project `$0`. Additional image paths or instructions may appear in `$ARGUMENTS`.
 
 ## Instructions
+
+Follow the generic file convention in `.claude/rules/project.md`. Use `ls -a` to inspect project/source/output directories before reading JSON details.
 
 1. Require a project/world slug in `$0`. If it is missing, ask which `worlds/<world-name>/` directory to use.
 2. Ensure the project envelope exists, stage any input images when appropriate, and read derived state:
@@ -57,16 +59,14 @@ worlds/$0/output/<object-slug>/object.json
     "materials": [],
     "source_images": [],
     "evidence": [],
-    "status": "pending",
+    "generate_as_3d_object": true,
     "working_dir": "worlds/$0/output/<object-slug>"
   },
-  "jobs": {},
-  "files": {},
   "updated_at": "..."
 }
 ```
 
-New objects should use `status: "pending"`. Existing completed objects should remain `completed` unless explicitly marked for regeneration. Object candidates remain in per-image JSON and root `image.json` as descriptive fallback data; object generation state lives in `object.json`.
+Object files store durable identity, intent, and provenance only. Do not write generated state such as `status`, `jobs`, generated `files`, request lifecycle, or completion data into `object.json`. Generated outputs and request state live beside `object.json` as indexed visible artifacts and hidden request JSON.
 
 11. Refresh derived project state:
 
@@ -74,10 +74,10 @@ New objects should use `status: "pending"`. Existing completed objects should re
 node .claude/scripts/project/project-state.mjs --world "$0"
 ```
 
-12. Report saved paths, source image count, per-image JSON count, created/updated object directory count, pending object count, completed object count, and regeneration count.
+12. Report saved paths, source image count, per-image JSON count, and created/updated object directory count.
 
 ## Output Locations
 
 - Per-image analysis: `worlds/$0/source/<image-name>.json`
 - Merged image and scene analysis: `worlds/$0/image.json`
-- Object state: `worlds/$0/output/<object-slug>/object.json`
+- Object intent/provenance: `worlds/$0/output/<object-slug>/object.json`

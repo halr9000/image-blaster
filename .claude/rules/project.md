@@ -1,4 +1,4 @@
-# Project: Compendium
+# Project: Image Blaster
 
 ## First-time setup
 
@@ -33,7 +33,7 @@ worlds/
       <image>.json   Per-image literal analysis beside the source image.
     output/
       world/      World Labs API output: world.json, operation.json
-      sfx/        World-level ambience and arbitrary sound effects: audio files plus sfx.json
+      sfx/        World-level ambience and arbitrary sound effect files.
       <object>/   Object source of truth: object.json plus generated images and meshes.
         sfx/      Object-specific impact or interaction sounds.
     scene/        project.json — Three.js editor App-format scene file
@@ -58,6 +58,11 @@ N-slug.ext
 - Read request semantics like `kind`, `role`, provider, and status from the JSON contents, not from the filename.
 - When multiple request files belong to the same artifact index, use `__scope` only to avoid filename collisions, e.g. `jar__image` and `jar__model`.
 - “Latest” means the highest `N` for a given `slug`.
+- This convention is generic for every generated thing. Do not create object-specific, SFX-specific, plate-specific, or asset-type-specific state systems when indexed artifacts plus hidden request JSON are enough.
+- Agents should inspect generated state with `ls -a <directory>` first, then read only the visible artifacts or hidden request JSON files needed for the task.
+- Do not duplicate generated file lists, counts, stages, completion status, or request lifecycle inside central JSON or `object.json`.
+- Do not add directory-specific snapshot helpers for simple operations an agent can infer from `ls -a`, indexed filenames, and small JSON files.
+- Do not preserve compatibility with unshipped branch state. If a JSON shape is wrong or bloated, replace it outright instead of layering legacy shims.
 
 Examples:
 
@@ -72,7 +77,7 @@ worlds/<slug>/output/jar/0-jar.glb
 worlds/<slug>/output/jar/.0-jar__model-request.json
 ```
 
-Central JSON should stay minimal: identity, user-authored intent, and active resume pointers only. Derive counts, stages, and completion status by scanning folders, generated artifacts, and colocated hidden request metadata when possible.
+Central JSON should stay minimal: identity, user-authored intent, and durable inputs that cannot be inferred from files. Derive counts, stages, and completion status by scanning folders, generated artifacts, and colocated hidden request metadata.
 
 ## Key files
 
@@ -81,9 +86,9 @@ Central JSON should stay minimal: identity, user-authored intent, and active res
 - `worlds/<slug>/scene/project.json` — Three.js editor scene. Written by `/threejs-edit`, loaded by the React app.
 - `worlds/<slug>/source/<image>.json` — per-image flat literal analysis written by `/image-blast-uncover`.
 - `worlds/<slug>/image.json` — merged canonical literal scene/image description written by `/image-blast-uncover`.
-- `worlds/<slug>/output/<object>/object.json` — per-object source of truth written by `/image-blast-uncover` and updated by `/image-blast-3d`.
-- `worlds/<slug>/output/sfx/sfx.json` — world-level or arbitrary SFX manifest written by `/image-blast-sfx`.
-- `worlds/<slug>/output/<object>/sfx/sfx.json` — object-specific SFX manifest written by `/image-blast-sfx`.
+- `worlds/<slug>/output/<object>/object.json` — per-object durable identity, intent, and source provenance. Generated files and request state live beside it, not inside it.
+- `worlds/<slug>/output/sfx/` — world-level or arbitrary SFX audio artifacts plus hidden request metadata.
+- `worlds/<slug>/output/<object>/sfx/` — object-specific SFX audio artifacts plus hidden request metadata.
 
 ## `input/` staging
 

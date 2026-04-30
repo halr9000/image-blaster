@@ -2,12 +2,14 @@
 name: image-blast-project
 description: Create, inspect, and manage an Image Blast project envelope under worlds/<slug>. Use before image-blast-uncover, image-blast-world, image-blast-3d, image-blast-sfx, or whenever the user asks about active project state.
 argument-hint: [world-name or description] [optional instructions]
-allowed-tools: Read Write Glob Bash(node .claude/scripts/project/project-state.mjs *)
+allowed-tools: Read Write Glob Bash(ls *) Bash(node .claude/scripts/project/project-state.mjs *)
 ---
 
 Create or inspect an Image Blast project. Input: `$ARGUMENTS`.
 
 ## Instructions
+
+Follow the generic file convention in `.claude/rules/project.md`. Inspect generated directories with `ls -a` before reading JSON details.
 
 1. Resolve the project slug:
    - If `$0` is an existing `worlds/<slug>` directory or a slug-like name, use it.
@@ -44,7 +46,7 @@ Only minimal `project.json` and directories are created automatically. Per-image
    - staged files moved from `input/`, if any
    - whether World Labs output exists
    - whether `image.json` exists
-   - derived object counts by status
+   - derived object count
    - whether world-level SFX exists
    - whether `scene/project.json` exists
 6. If source images now exist and `image.json` is missing, continue directly with the `/image-blast-uncover` workflow for no-cost literal image analysis and object directory creation. Do not stop just to ask whether to start uncover.

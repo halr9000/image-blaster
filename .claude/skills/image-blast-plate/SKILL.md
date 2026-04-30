@@ -2,7 +2,7 @@
 name: image-blast-plate
 description: Create indexed plate/source cleanup images by removing successfully generated 3D objects and optional extra content from source images. Use when the user asks for plates, clean plates, object removal, removing generated objects from source images, or source image cleanup.
 argument-hint: [world-name] [optional source image or extra removal instructions]
-allowed-tools: Read Write Glob Bash(node .claude/scripts/project/project-state.mjs *) Bash(node .claude/scripts/plate/generate-plates.mjs *)
+allowed-tools: Read Write Glob Bash(ls *) Bash(node .claude/scripts/project/project-state.mjs *) Bash(node .claude/scripts/plate/generate-plates.mjs *)
 context: fork
 agent: general-purpose
 ---
@@ -10,6 +10,8 @@ agent: general-purpose
 Create plate images for project `$0`. Additional source image names, paths, or removal instructions may appear in `$ARGUMENTS`.
 
 ## Instructions
+
+Follow the generic file convention in `.claude/rules/project.md`. Use `ls -a` to inspect source and object output directories before reading JSON details.
 
 1. Require a project/world slug in `$0`. If it is missing, ask which `worlds/<world-name>/` directory to process.
 2. Ensure the project envelope exists and read derived state:
@@ -19,13 +21,9 @@ node .claude/scripts/project/project-state.mjs --world "$0"
 ```
 
 3. Before FAL calls, remind the user that this uses `FAL_KEY`, may incur FAL image-edit cost, and writes derived source images. If the user directly invoked this skill, proceed.
-4. Use the project indexed file convention from `.claude/rules/project.md`:
-   - source originals are `source/0-<slug>.<ext>`
-   - plate outputs are `source/1-<slug>.png`, `source/2-<slug>.png`, etc.
-   - request metadata is hidden beside the output, e.g. `source/.1-<slug>-request.json`
-   - read request `kind` and `role` from the metadata JSON, not from the filename
+4. Use the indexed source families from `.claude/rules/project.md`.
 5. Default behavior:
-   - Scan successful object generations from `worlds/$0/output/*/object.json` and generated model files.
+   - Scan successful object generations from visible generated model files in `worlds/$0/output/<object>/`.
    - For each source image family, use the latest indexed source image as input.
    - Use this prompt shape: `remove the following objects from the image: <list of object names from successful 3d object generations>`.
    - Append any extra removal instruction from `$ARGUMENTS`, such as `water`, `the cables`, or `all people`.

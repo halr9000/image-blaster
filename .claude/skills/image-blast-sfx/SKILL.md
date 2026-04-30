@@ -2,7 +2,7 @@
 name: image-blast-sfx
 description: Generate world ambience loops, object impact sounds, or arbitrary sound effects with the FAL ElevenLabs SFX endpoint. Use when the user asks for SFX, ambient audio, looping scene sound, collision sounds, impact sounds, or object audio.
 argument-hint: [world-name] [optional object-id or SFX prompt/instructions]
-allowed-tools: Read Write Glob Bash(node .claude/scripts/project/project-state.mjs *) Bash(node .claude/scripts/sfx/fal-elevenlabs-sfx.mjs *)
+allowed-tools: Read Write Glob Bash(ls *) Bash(node .claude/scripts/project/project-state.mjs *) Bash(node .claude/scripts/sfx/fal-elevenlabs-sfx.mjs *)
 context: fork
 agent: general-purpose
 ---
@@ -10,6 +10,8 @@ agent: general-purpose
 Generate sound effects for project `$0`. Additional object IDs, prompts, loop instructions, or count instructions may appear in `$ARGUMENTS`.
 
 ## Instructions
+
+Follow the generic file convention in `.claude/rules/project.md`. Use `ls -a` to inspect SFX output directories before reading request metadata.
 
 1. Require a project/world slug in `$0`. If missing, ask which `worlds/<world-name>/` directory to use.
 2. Ensure the project envelope exists and read derived state:
@@ -63,13 +65,12 @@ Add `--loop` only for looping sounds. Optional defaults are `--output-format mp3
 6. The helper writes indexed audio files plus hidden compact request metadata in the output directory:
    - audio files like `0-ambient-loop.mp3`, `0-impact-1.mp3`, or `1-impact-2.mp3`
    - request metadata like `.0-ambient-loop-request.json`, `.1-impact-2-request.json`
-   - `sfx.json` only for minimal manifest/resume pointers when needed
    Read request `kind` and `sfx_kind` from the metadata JSON, not from the filename.
    Do not hand-edit generated audio metadata unless correcting paths after a manual file move.
 7. Report:
    - generated file paths
    - whether each sound loops
-   - hidden request metadata paths and manifest path, if present
+   - hidden request metadata paths
    - prompt used
 
 ## Prompt Guidance

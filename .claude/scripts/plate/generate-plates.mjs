@@ -108,8 +108,7 @@ async function successfulObjects(worldDir) {
     if (!objectJson) continue;
 
     const object = objectJson.object || objectJson;
-    const generated = await hasGeneratedModel(objectDir);
-    if (!generated && object.status !== "completed") continue;
+    if (!(await hasGeneratedModel(objectDir))) continue;
 
     objects.push({
       id: object.id || entry.name,
