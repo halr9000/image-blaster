@@ -89,4 +89,4 @@ After root `image.json` is approved, create or update one `object.json` per appr
 worlds/<slug>/output/<object-slug>/object.json
 ```
 
-Each object file should contain the stable object ID, name, literal description, materials, source image paths, evidence, generation status, and working directory. The object file is the generation source of truth.
+Each object file should contain the stable object ID, name, literal description, materials, source image paths, evidence, and working directory. Generated state lives beside it as files and hidden request JSON.

@@ -1,34 +1,27 @@
 ---
 name: image-blast-plate
-description: Create indexed plate/source cleanup images by removing successfully generated 3D objects and optional extra content from source images. Use when the user asks for plates, clean plates, object removal, removing generated objects from source images, or source image cleanup.
+description: Generate an image edit that removes generated objects or specified content from source images.
 argument-hint: [world-name] [optional source image or extra removal instructions]
 allowed-tools: Read Write Glob Bash(ls *) Bash(node .claude/scripts/project/project-state.mjs *) Bash(node .claude/scripts/plate/generate-plates.mjs *)
 context: fork
-agent: general-purpose
+agent: image-blast-plate
 ---
 
-Create plate images for project `$0`. Additional source image names, paths, or removal instructions may appear in `$ARGUMENTS`.
+Create images plates for project `$0`.
 
 ## Instructions
 
-Follow the generic file convention in `.claude/rules/project.md`. Use `ls -a` to inspect source and object output directories before reading JSON details.
-
-1. Require a project/world slug in `$0`. If it is missing, ask which `worlds/<world-name>/` directory to process.
-2. Ensure the project envelope exists and read derived state:
+- If `$0` is missing, ask for the world slug.
+- Use `ls -a` before reading generated state.
+- By default, remove successfully generated 3D objects from the latest indexed source images.
+- If `$ARGUMENTS` names a source image/path, process only that source family unless the request says all.
+- Pass extra removal instructions through `--remove`.
 
 ```bash
 node .claude/scripts/project/project-state.mjs --world "$0"
 ```
 
-3. Before FAL calls, remind the user that this uses `FAL_KEY`, may incur FAL image-edit cost, and writes derived source images. If the user directly invoked this skill, proceed.
-4. Use the indexed source families from `.claude/rules/project.md`.
-5. Default behavior:
-   - Scan successful object generations from visible generated model files in `worlds/$0/output/<object>/`.
-   - For each source image family, use the latest indexed source image as input.
-   - Use this prompt shape: `remove the following objects from the image: <list of object names from successful 3d object generations>`.
-   - Append any extra removal instruction from `$ARGUMENTS`, such as `water`, `the cables`, or `all people`.
-6. If the user names a specific source image or path, process only that source family unless they explicitly ask for all.
-7. Generate plates with:
+Run:
 
 ```bash
 node .claude/scripts/plate/generate-plates.mjs \
@@ -37,11 +30,10 @@ node .claude/scripts/plate/generate-plates.mjs \
   --image "<optional source image path or name>"
 ```
 
-Omit `--image` when processing all source families. Repeat `--remove` for multiple extra removal instructions. Optional provider override: `--image-edit-provider nano-banana|gpt-image-2`.
-8. Refresh derived project state:
+Omit `--image` when processing all source families. Optional provider override: `--image-edit-provider nano-banana|gpt-image-2`.
 
 ```bash
 node .claude/scripts/project/project-state.mjs --world "$0"
 ```
 
-9. Report input image, output plate image, hidden request metadata path, and prompt used for each generated plate.
+Final response: report input images, output plate images, request metadata, and prompts used.

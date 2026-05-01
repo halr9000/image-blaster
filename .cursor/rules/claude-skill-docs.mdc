@@ -1,0 +1,17 @@
+---
+description: Keep Claude Code skills thin and aligned with the official skills docs
+globs: .claude/skills/**/SKILL.md
+alwaysApply: false
+---
+
+# Claude Code Skills
+
+Follow the official Claude Code skills docs when editing `SKILL.md` files: https://code.claude.com/docs/en/skills
+
+- Skills are thin task surfaces: frontmatter plus concise instructions. Do not turn them into long orchestration manuals.
+- `context: fork` means the skill runs in a forked subagent. The rendered `SKILL.md` is the subagent prompt and does not have access to parent conversation history.
+- `agent` selects which subagent type executes the forked skill. If omitted, Claude Code uses `general-purpose`.
+- `allowed-tools` pre-approves listed tools for the active skill. It does not restrict all other tools; permissions still apply.
+- `description` and `when_to_use` should front-load trigger phrases. Keep them clearer than the body.
+- Use `disable-model-invocation: true` for side-effecting skills that only the user should trigger.
+- Invoked skill content persists for the rest of the session, so keep standing guidance short and unambiguous.

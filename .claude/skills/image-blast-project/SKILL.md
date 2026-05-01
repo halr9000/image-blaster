@@ -1,6 +1,6 @@
 ---
 name: image-blast-project
-description: Create, inspect, and manage an Image Blast project envelope under worlds/<slug>. Use before image-blast-uncover, image-blast-world, image-blast-3d, image-blast-sfx, or whenever the user asks about active project state.
+description: Create, inspect, and manage an IMAGE-BLAST project envelope under worlds/<slug>. Use before other image-blast skills (image-blast-uncover, image-blast-world, image-blast-3d, etc.) or whenever the user asks about active project state.
 argument-hint: [world-name or description] [optional instructions]
 allowed-tools: Read Write Glob Bash(ls *) Bash(node .claude/scripts/project/project-state.mjs *)
 ---
@@ -49,9 +49,10 @@ Only minimal `project.json` and directories are created automatically. Per-image
    - derived object count
    - whether world-level SFX exists
    - whether `scene/project.json` exists
-6. If source images now exist and `image.json` is missing, continue directly with the `/image-blast-uncover` workflow for no-cost literal image analysis and object directory creation. Do not stop just to ask whether to start uncover.
+6. If source images now exist and `image.json` is missing, continue directly with the `/image-blast-uncover` workflow for no-cost image analysis and object directory creation.
 7. Recommend paid or downstream actions only after no-cost setup/analysis is complete:
-   - `/image-blast-world <slug> ...` for World Labs generation
-   - `/image-blast-3d <slug>` for object generation from `output/<object-slug>/object.json`
-   - `/image-blast-sfx <slug> ...` for ambient, object-impact, or arbitrary sound effects
+   - `Agent(image-blast-world)` for World Labs generation
+   - `Agent(image-blast-3d)` once per object for 3D generation
+   - `Agent(image-blast-sfx)` for ambient, object-impact, or arbitrary sound effects
+   - `Agent(image-blast-plate)` for plate/source cleanup generation
    - `/threejs-edit <slug> ...` for scene edits
