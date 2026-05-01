@@ -29,7 +29,7 @@ node .claude/scripts/project/project-state.mjs --world "$0" --stage-input
 6. Treat existing `worlds/$0/source/<image-name>.json` files as reusable analysis:
    - If the source image or user instruction changed, update the sibling JSON.
    - If the user deleted a source image or source JSON, do not recreate it unless the image still exists and should be analyzed.
-7. After all per-image JSON files exist, derive `worlds/$0/image.json` by reading and merging all valid `worlds/$0/source/*.json` image analyses:
+7. After all per-image JSON files exist, derive `worlds/$0/image.json` by reading and merging all valid `worlds/$0/source/*.json` image analyses.
    - combine `source_images`
    - synthesize one shared `scene_name`, `short_caption`, and `literal_description`
    - merge `environment`, `visual_style`, `lighting`, `atmosphere`, and `ambient_sound`
@@ -68,16 +68,21 @@ worlds/$0/output/<object-slug>/object.json
 
 Object files store durable identity, intent, and provenance only. Do not write generated state such as `status`, `jobs`, generated `files`, request lifecycle, or completion data into `object.json`. Generated outputs and request state live beside `object.json` as indexed visible artifacts and hidden request JSON.
 
-11. Refresh derived project state:
+11. After object files are written, handle the clean plate decision:
+   - In one-shot mode, continue with `Agent(image-blast-plate)` and wait for it before world generation.
+   - Otherwise ask whether to remove confirmed objects any anything else the user wants to remove from the source image to create a clean plate to generate a world from.
+
+12. Refresh derived project state:
 
 ```bash
 node .claude/scripts/project/project-state.mjs --world "$0"
 ```
 
-12. Report saved paths, source image count, per-image JSON count, and created/updated object directory count.
+13. Report saved paths, source image count, per-image JSON count, created/updated object directory count, and the clean plate decision.
 
 ## Output Locations
 
 - Per-image analysis: `worlds/$0/source/<image-name>.json`
 - Merged image and scene analysis: `worlds/$0/image.json`
 - Object intent/provenance: `worlds/$0/output/<object-slug>/object.json`
+- Clean plate decision: `worlds/$0/source/<source-slug>-plate.png`

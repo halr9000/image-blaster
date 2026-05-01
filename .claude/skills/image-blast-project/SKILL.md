@@ -51,7 +51,8 @@ Only minimal `project.json` and directories are created automatically. `/image-b
    - whether `scene/project.json` exists
 6. If source images now exist and `image.json` is missing, continue directly with the `/image-blast-uncover` workflow for no-cost image analysis and object directory creation.
 7. Recommend downstream actions only after no-cost setup/analysis is complete, in this order:
+   - `Agent(image-blast-plate)` for clean plate/source cleanup after object confirmation, when requested or one-shotting
    - `Agent(image-blast-world)` for static 3D environment world generation
    - `Agent(image-blast-3d)` per object 3D generation
    - `Agent(image-blast-sfx)` for ambient, object-impact, or arbitrary sound effects
-   - `Agent(image-blast-edit)` for prompt-based image editing
+   - `Agent(image-blast-edit)` for generic standalone prompt-based image editing

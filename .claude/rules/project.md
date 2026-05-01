@@ -51,11 +51,11 @@ N-slug.ext
 
 When doing an IMAGE-BLAST, it can be done in one-shot by following this order:
 
-1. Inspect project state and `input/`, 
+1. Inspect project state and `input/`.
 2. Initialize project with slug if needed and stage inputs into `worlds/<slug>/source/`.
 3. Uncover/analyze the source image
-4. Finish analysis and object directories with `object.json` per object
-5. Create a world with the world skill, which uses a synchronous image edit to create a clean plate when confirmed objects should be removed, then generates the world from the newest source image.
+4. Finish analysis, confirm objects, and write `object.json` per object. This is also the clean plate decision point: in one-shot mode, run `Agent(image-blast-plate)` and wait; otherwise ask whether to remove confirmed objects or anything else from the source image.
+5. Create a world with `Agent(image-blast-world)` from the newest source image, which may be the generated plate.
 6. Launch one 3D object agent per confirmed object to create 3D models
 7. Launch SFX agents for ambience and also for every object to create object-specific sounds.
 
