@@ -17,6 +17,8 @@ type PointerHandler = (event: ThreeEvent<PointerEvent>) => void
 type HoverHandler = (objectId: string, hovering: boolean) => void
 type ClickHandler = (worldPos: THREE.Vector3) => void
 
+const ignoreRaycast: THREE.Object3D['raycast'] = () => {}
+
 export interface SceneObjectHandle {
   id: string
   rigidBody: RapierRigidBody | null
@@ -100,6 +102,7 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
       if (!(child instanceof THREE.Mesh)) return
 
       child.castShadow = true
+      child.raycast = ignoreRaycast
       const litMaterials = cloneMaterial(child.material)
       child.material = litMaterials
       const colorEntries = asMaterialArray(litMaterials)
@@ -133,6 +136,7 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
       colliderWireframeMaterial: new THREE.MeshBasicMaterial({
         color: COLLIDER_WIREFRAME_COLOR,
         wireframe: true,
+        transparent: true,
         toneMapped: false,
         fog: false,
       }),
@@ -144,6 +148,7 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
       if (!(child instanceof THREE.Mesh)) return
       child.material = wireframeOverlayMaterial
       child.renderOrder = 1
+      child.raycast = ignoreRaycast
     })
   }, [wireframeOverlayScene, wireframeOverlayMaterial])
 
@@ -171,6 +176,12 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
       }
     }
   }, [isHovered, materialStates, renderMode, wireframeMaterial, shadedMaterial])
+
+  useEffect(() => {
+    colliderWireframeMaterial.opacity = renderMode === ObjectRenderMode.Lit ? 0 : 1
+    colliderWireframeMaterial.depthWrite = renderMode !== ObjectRenderMode.Lit
+    colliderWireframeMaterial.needsUpdate = true
+  }, [colliderWireframeMaterial, renderMode])
 
   useEffect(() => {
     sfxRefs.current.length = object.sfxUrls.length
@@ -240,13 +251,9 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
         args={[colliderHalfExtents.x, colliderHalfExtents.y, colliderHalfExtents.z]}
         position={[colliderCenter.x, colliderCenter.y, colliderCenter.z]}
       />
-      {renderMode !== ObjectRenderMode.Lit && (
-        <mesh position={[colliderCenter.x, colliderCenter.y, colliderCenter.z]} material={colliderWireframeMaterial}>
-          <boxGeometry args={[colliderHalfExtents.x * 2, colliderHalfExtents.y * 2, colliderHalfExtents.z * 2]} />
-        </mesh>
-      )}
-      <group
-        scale={OBJECT_SCALE}
+      <mesh
+        position={[colliderCenter.x, colliderCenter.y, colliderCenter.z]}
+        material={colliderWireframeMaterial}
         onPointerOver={(event) => {
           event.stopPropagation()
           onHover(object.id, true)
@@ -269,6 +276,9 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
       >
+        <boxGeometry args={[colliderHalfExtents.x * 2, colliderHalfExtents.y * 2, colliderHalfExtents.z * 2]} />
+      </mesh>
+      <group scale={OBJECT_SCALE}>
         <primitive object={scene} position={offset} dispose={null} />
         {renderMode === ObjectRenderMode.ShadedWireframe && (
           <primitive object={wireframeOverlayScene} position={offset} dispose={null} />

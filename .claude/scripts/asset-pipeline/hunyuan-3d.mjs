@@ -7,7 +7,7 @@ import { runFalImageTo3DProvider } from "./fal-3d-provider.mjs";
 
 export const HUNYUAN_3D_ENDPOINT = "fal-ai/hunyuan-3d/v3.1/pro/image-to-3d";
 export const HUNYUAN_3D_PROVIDER = "hunyuan";
-export const DEFAULT_HUNYUAN_FACE_COUNT = 60000;
+export const DEFAULT_HUNYUAN_FACE_COUNT = 50000;
 export const DEFAULT_HUNYUAN_ENABLE_PBR = true;
 export const DEFAULT_HUNYUAN_GENERATE_TYPE = "Normal";
 

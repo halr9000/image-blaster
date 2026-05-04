@@ -8,7 +8,9 @@
       "Bash(node .claude/scripts/world/generate-world.mjs:*)",
       "Bash(node .claude/scripts/asset-pipeline/generate-single-asset.mjs:*)",
       "Bash(node .claude/scripts/sfx/fal-elevenlabs-sfx.mjs:*)",
-      "Bash(node .claude/scripts/fal/run-fal.mjs:*)"
+      "Bash(node .claude/scripts/fal/run-fal.mjs:*)",
+      "Bash(bun install:*)",
+      "Bash(bun run dev:*)"
     ]
   },
   "hooks": {

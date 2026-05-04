@@ -1,6 +1,6 @@
 ---
 name: image-blast-3d
-description: Generate one specified 3D object. Use when the user names exactly one object to make, or provides one image plus the object name/description. Defaults to Meshy image-to-3D and supports Hunyuan as an alternate provider.
+description: Generate one specified 3D object. Use when the user names exactly one object to make, or provides one image plus the object name/description.
 argument-hint: [world-name] [object-id/name or image path + object description] [--provider meshy|hunyuan] [--target-polycount N] [--face-count N] [--enable-pbr true|false]
 allowed-tools: Read Write Glob Bash(ls *) Bash(node .claude/scripts/project/project-state.mjs *) Bash(node .claude/scripts/asset-pipeline/generate-single-asset.mjs *)
 context: fork
@@ -46,7 +46,13 @@ Run the generator and wait for it to finish:
 node .claude/scripts/asset-pipeline/generate-single-asset.mjs --world "$0" --object-id "<object-id>"
 ```
 
-Meshy is the default 3D provider. Meshy defaults are:
+Hunyuan is the default 3D provider. Hunyuan defaults are `--face-count 50000`, `--enable-pbr true`, and `--generate-type Normal`. If the user asks for more detail, polygon reduction, or a white geometry-only model, pass the matching options:
+
+- `--face-count <40000-1500000>`
+- `--generate-type Normal|LowPoly|Geometry`
+- `--enable-pbr true|false`
+
+Pass `--provider meshy` only when the user asks for Meshy. Meshy defaults are:
 
 ```json
 {
@@ -63,12 +69,6 @@ Meshy is the default 3D provider. Meshy defaults are:
   "enable_pbr": true
 }
 ```
-
-Pass `--provider hunyuan` only when the user asks for Hunyuan. Hunyuan defaults are `--face-count 60000`, `--enable-pbr true`, and `--generate-type Normal`. If the user asks for more detail, polygon reduction, or a white geometry-only model, pass the matching options:
-
-- `--face-count <40000-1500000>`
-- `--generate-type Normal|LowPoly|Geometry`
-- `--enable-pbr true|false`
 
 For Meshy-specific requests, pass the matching options:
 

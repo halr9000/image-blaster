@@ -4,10 +4,9 @@ interface Props {
   domElement: HTMLElement
   onDollyPixels: (delta: number) => void
   onTumblePixels: (dx: number, dy: number) => void
-  onPanPixels: (dx: number, dy: number) => void
 }
 
-export function useCameraGestures({ domElement, onDollyPixels, onTumblePixels, onPanPixels }: Props) {
+export function useCameraGestures({ domElement, onDollyPixels, onTumblePixels }: Props) {
   useEffect(() => {
     let rightDragging = false
     let lastMouseX = 0
@@ -48,12 +47,13 @@ export function useCameraGestures({ domElement, onDollyPixels, onTumblePixels, o
         onDollyPixels(e.deltaY)
         return
       }
-      // trackpad two-finger pan: significant lateral component in pixel mode
-      if (e.deltaMode === 0 && Math.abs(e.deltaX) > Math.abs(e.deltaY) * 0.4) {
-        onPanPixels(e.deltaX, e.deltaY)
+      // Trackpad two-finger drag reports as pixel-mode wheel, including vertical drags.
+      // Treat it as look/tumble; translation stays on fly keys and zoom stays on pinch/wheel.
+      if (e.deltaMode === 0) {
+        onTumblePixels(-e.deltaX, -e.deltaY)
         return
       }
-      // mouse wheel / vertical trackpad → zoom
+      // Mouse wheel zooms on non-pixel wheel events.
       onDollyPixels(e.deltaY)
     }
 
@@ -80,11 +80,15 @@ export function useCameraGestures({ domElement, onDollyPixels, onTumblePixels, o
       const dist = touchDist(e.touches)
       const c = touchCenter(e.touches)
       if (twoFingerActive) {
-        const pinchDelta = lastPinchDist - dist
-        if (Math.abs(pinchDelta) > 0.5) onDollyPixels(pinchDelta * 2.5)
         const dx = c.x - lastTouchX
         const dy = c.y - lastTouchY
-        if (Math.abs(dx) > 0.2 || Math.abs(dy) > 0.2) onPanPixels(-dx * 5, dy * 5)
+        const centerMove = Math.hypot(dx, dy)
+        const pinchDelta = lastPinchDist - dist
+        if (centerMove > 0.2) {
+          onTumblePixels(-dx, -dy)
+        } else if (Math.abs(pinchDelta) > 4) {
+          onDollyPixels(pinchDelta * 2.5)
+        }
       }
       lastPinchDist = dist
       lastTouchX = c.x
@@ -117,5 +121,5 @@ export function useCameraGestures({ domElement, onDollyPixels, onTumblePixels, o
       domElement.removeEventListener('touchend', onTouchEnd)
       domElement.removeEventListener('touchcancel', onTouchEnd)
     }
-  }, [domElement, onDollyPixels, onTumblePixels, onPanPixels])
+  }, [domElement, onDollyPixels, onTumblePixels])
 }

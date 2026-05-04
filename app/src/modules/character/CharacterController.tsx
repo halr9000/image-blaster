@@ -3,7 +3,6 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { RigidBody, CapsuleCollider, useRapier } from '@react-three/rapier'
 import * as THREE from 'three'
 import { useCameraDollyGestures } from '../camera/useCameraDollyGestures'
-import { shouldSuppressPointerLock } from '../interaction/pointerGuards'
 
 export interface CharacterControllerHandle {
   reset: () => void
@@ -75,20 +74,6 @@ export const CharacterController = forwardRef<CharacterControllerHandle>(
     window.addEventListener('keydown', onKey)
     window.addEventListener('keyup', onKey)
 
-    const onPointerLock = (e: MouseEvent) => {
-      if (e.button !== 0 || e.defaultPrevented || shouldSuppressPointerLock()) return
-      gl.domElement.requestPointerLock()
-    }
-    gl.domElement.addEventListener('click', onPointerLock)
-
-    const onMouseMove = (e: MouseEvent) => {
-      if (document.pointerLockElement !== gl.domElement) return
-      rawYaw.current -= e.movementX * 0.002
-      rawPitch.current -= e.movementY * 0.002
-      rawPitch.current = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, rawPitch.current))
-    }
-    document.addEventListener('mousemove', onMouseMove)
-
     // Touch handlers
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length >= 2) return
@@ -134,8 +119,6 @@ export const CharacterController = forwardRef<CharacterControllerHandle>(
     return () => {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('keyup', onKey)
-      gl.domElement.removeEventListener('click', onPointerLock)
-      document.removeEventListener('mousemove', onMouseMove)
       gl.domElement.removeEventListener('touchstart', onTouchStart)
       gl.domElement.removeEventListener('touchmove', onTouchMove)
       gl.domElement.removeEventListener('touchend', onTouchEnd)

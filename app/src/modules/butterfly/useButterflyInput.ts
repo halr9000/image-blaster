@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useThree } from '@react-three/fiber'
 import { useCameraDollyGestures } from '../camera/useCameraDollyGestures'
-import { shouldSuppressPointerLock } from '../interaction/pointerGuards'
 import { useButterflyStore } from './store'
 
 export interface ButterflyInput {
@@ -66,25 +65,6 @@ export function useButterflyInput(): ButterflyInput {
 
     const onBlur = () => keys.current.clear()
     window.addEventListener('blur', onBlur)
-
-    const requestLock = (e: MouseEvent) => {
-      if (e.button !== 0 || e.defaultPrevented || shouldSuppressPointerLock()) return
-      if (document.pointerLockElement !== gl.domElement) {
-        gl.domElement.requestPointerLock()
-      }
-    }
-    gl.domElement.addEventListener('click', requestLock)
-
-    const onMouseMove = (e: MouseEvent) => {
-      if (document.pointerLockElement !== gl.domElement) return
-      const st = useButterflyStore.getState()
-      const s = st.mouseSensitivity
-      const ySign = st.invertY ? 1 : -1
-      yaw.current -= e.movementX * s
-      pitch.current += e.movementY * s * ySign
-      pitch.current = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, pitch.current))
-    }
-    document.addEventListener('mousemove', onMouseMove)
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
@@ -166,8 +146,6 @@ export function useButterflyInput(): ButterflyInput {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('keyup', onKey)
       window.removeEventListener('blur', onBlur)
-      gl.domElement.removeEventListener('click', requestLock)
-      document.removeEventListener('mousemove', onMouseMove)
       gl.domElement.removeEventListener('wheel', onWheel)
       gl.domElement.removeEventListener('touchstart', onTouchStart)
       gl.domElement.removeEventListener('touchmove', onTouchMove)

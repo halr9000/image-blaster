@@ -49,7 +49,7 @@ import {
 const IMAGE_EXTENSIONS = new Set([".avif", ".gif", ".jpeg", ".jpg", ".png", ".webp"]);
 const MODEL_EXTENSIONS = new Set([".blend", ".fbx", ".glb", ".obj", ".stl", ".usdz"]);
 const GENERATED_OBJECT_FIELDS = new Set(["status"]);
-export const DEFAULT_3D_PROVIDER = MESHY_3D_PROVIDER;
+export const DEFAULT_3D_PROVIDER = HUNYUAN_3D_PROVIDER;
 const MODEL_PROVIDER_ALIASES = new Map([
   ["meshy", MESHY_3D_PROVIDER],
   ["fal-ai/meshy/v6/image-to-3d", MESHY_3D_PROVIDER],
@@ -581,7 +581,7 @@ async function main() {
 
   if (!world || (!objectId && !directImage)) {
     throw new Error(
-      "Usage: node generate-single-asset.mjs --world <world-name> (--object-id <object-id> | --image <path>) [--object-name <name>] [--description <text>] [--provider meshy|hunyuan] [--regenerate] [--target-polycount 30000] [--face-count <40000-1500000>] [--enable-pbr true|false]"
+      "Usage: node generate-single-asset.mjs --world <world-name> (--object-id <object-id> | --image <path>) [--object-name <name>] [--description <text>] [--provider hunyuan|meshy] [--regenerate] [--face-count <40000-1500000>] [--target-polycount 30000] [--enable-pbr true|false]"
     );
   }
 

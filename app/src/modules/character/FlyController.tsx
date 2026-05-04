@@ -2,7 +2,6 @@ import { useRef, useEffect, forwardRef, useImperativeHandle, useCallback } from 
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { useCameraGestures } from '../camera/useCameraGestures'
-import { shouldSuppressPointerLock } from '../interaction/pointerGuards'
 import { cameraFocusTarget } from '../camera/cameraFocus'
 
 export interface FlyControllerHandle {
@@ -41,13 +40,7 @@ export const FlyController = forwardRef<FlyControllerHandle>(function FlyControl
     rawPitch.current = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, rawPitch.current))
   }, [])
 
-  const applyPan = useCallback((dx: number, dy: number) => {
-    _right.set(1, 0, 0).applyQuaternion(camera.quaternion)
-    camera.position.addScaledVector(_right, dx * DOLLY_UNITS_PER_PIXEL)
-    camera.position.addScaledVector(_up, dy * DOLLY_UNITS_PER_PIXEL)
-  }, [camera])
-
-  useCameraGestures({ domElement: gl.domElement, onDollyPixels: applyDolly, onTumblePixels: applyTumble, onPanPixels: applyPan })
+  useCameraGestures({ domElement: gl.domElement, onDollyPixels: applyDolly, onTumblePixels: applyTumble })
 
   useImperativeHandle(ref, () => ({
     reset: () => {
@@ -67,26 +60,9 @@ export const FlyController = forwardRef<FlyControllerHandle>(function FlyControl
     window.addEventListener('keydown', onKey)
     window.addEventListener('keyup', onKey)
 
-    const onPointerLock = (e: MouseEvent) => {
-      if (e.button !== 0 || e.defaultPrevented || shouldSuppressPointerLock()) return
-      gl.domElement.requestPointerLock()
-    }
-    gl.domElement.addEventListener('click', onPointerLock)
-
-    const onMouseMove = (e: MouseEvent) => {
-      if (document.pointerLockElement !== gl.domElement) return
-      cameraFocusTarget.current = null  // cancel focus on manual look
-      rawYaw.current -= e.movementX * 0.002
-      rawPitch.current -= e.movementY * 0.002
-      rawPitch.current = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, rawPitch.current))
-    }
-    document.addEventListener('mousemove', onMouseMove)
-
     return () => {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('keyup', onKey)
-      gl.domElement.removeEventListener('click', onPointerLock)
-      document.removeEventListener('mousemove', onMouseMove)
     }
   }, [gl])
 
