@@ -11,34 +11,25 @@
           '-....-'
 ```
 
-IMAGE-BLASTER is a harness for creating derivative assets from images.
+`image-blaster` is a harness for creating derivative assets from images.
 
-## Run
+## Quickstart
 
-1. Copy `.env.example` to `.env` and fill in the keys.
-2. Put an image into `input/`.
-3. Open a Terminal in your directory and ask it to `IMAGE-BLAST` it.
-4. To view worlds:
+1. Open a Terminal, enter `git clone https://github.com/neilsonnn/image-blaster`
+2. Enter the directory with `cd image-blaster`
+3. Run `claude` (install with `curl -fsSL https://claude.ai/install.sh | bash`)
+4. Say hello to Claude, and give them your API key for World Labs and FAL
+5. Put an image into `input/` and ask Claude to `IMAGE-BLAST` it.
 
-```bash\
-bun install
-bun dev
-```
+## Description
 
-
-From an image it creates 3D models, environment, ambient sound, object specific sounds, and lighting.
+From your input image, `image-blaster` will create 3D models and environment, ambient sounds, object specific sfx, and lighting.
 
 Video game level concepts? `IMAGE-BLAST` it.
 Your childhood bedroom? `IMAGE-BLAST` it.
 A film location scout? `IMAGE-BLAST` it.
 An architectural rendering? `IMAGE-BLAST` it.
 A photograph of your favourite coordinate on earth? `IMAGE-BLAST` it.
-
-Do you understand? If you have an image of anything, you can reason about it, you can hear it, you can feel it, you can `IMAGE-BLAST` it.
-
-If you have visualized something, anything, `IMAGE-BLASTER` is for you.
-
-Open `http://localhost:5173`.
 
 ## Advanced
 
