@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowSquareOut, Cube, GlobeSimple, ListIcon, QuestionMarkIcon } from '@phosphor-icons/react'
+import { ArrowSquareOut, Cube, FolderOpenIcon, GlobeSimple, ListIcon, QuestionMarkIcon } from '@phosphor-icons/react'
 import { useLocation } from 'wouter'
 import type { WorldEntry } from '../types/world'
 import { pendingFocusId } from '../modules/camera/cameraFocus'
@@ -19,7 +19,7 @@ function IconTile({
   children: React.ReactNode
 }) {
   return (
-    <span className="relative w-9 h-9 overflow-hidden rounded-xl bg-white/10 ring-1 ring-white/10 flex-shrink-0">
+    <span className="relative w-8 h-8 overflow-hidden rounded-lg bg-white/10 ring-1 ring-white/10 flex-shrink-0">
       {thumbnailUrl && (
         <img
           src={thumbnailUrl}
@@ -38,52 +38,81 @@ function IconTile({
 export function WorldSidebar({ worlds, activeSlug }: Props) {
   const [, navigate] = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
+  const canOpenLocalFolders = import.meta.env.DEV
 
   const selectWorld = (slug: string) => {
     navigate(`/${slug}`)
     setMenuOpen(false)
   }
 
+  const openWorldFolder = (slug: string) => {
+    fetch(`/__open-world-folder?slug=${encodeURIComponent(slug)}`).catch((error) => {
+      console.warn(`Could not open world folder for "${slug}".`, error)
+    })
+  }
+
   return (
-    <aside className="w-full sm:w-64 max-h-[calc(100vh-2rem)] flex flex-col gap-2">
-      <div className="flex items-center justify-between rounded-3xl bg-black/60 px-4 py-3 text-[13px] font-medium font-mono backdrop-blur-md ring-1 ring-white/10 shadow-2xl flex-shrink-0">
+    <aside className="w-full sm:w-56 max-h-[calc(100vh-2rem)] flex flex-col gap-1 whitespace-nowrap text-sm">
+      <div className="flex items-center justify-between rounded bg-black/60 px-2 py-1 text-sm font-medium font-mono backdrop-blur-md ring-1 ring-white/10 shadow-2xl flex-shrink-0">
         <AppButton
           onClick={() => setMenuOpen((open) => !open)}
-          className="min-w-0 flex-1 gap-2 p-0 font-mono text-white opacity-100 hover:bg-transparent"
+          className="min-w-0 flex-1 gap-2 px-1 truncate font-mono text-white opacity-100 hover:bg-transparent"
           aria-expanded={menuOpen}
         >
           <ListIcon size={16} weight="regular" className="text-white/60 sm:hidden" />
-          <span>image-blaster</span>
+          <span>image-blaster</span>{activeSlug && <span className="text-white/40 sm:hidden md:hidden">/ {activeSlug}</span>}
         </AppButton>
         <a
           href="https://github.com/neilsonnn/image-blaster"
           target="_blank"
           rel="noreferrer"
-          className="inline-flex h-7 w-7 items-center justify-center rounded-lg p-1 text-white opacity-80 transition-[background-color,opacity] hover:bg-white/10 hover:opacity-100"
+          className="inline-flex h-7 w-7 items-center justify-center rounded p-1 text-white opacity-80 transition-[background-color,opacity] hover:bg-white/10 hover:opacity-100"
           aria-label="Open image-blaster repository"
         >
           <span className="text-sm leading-none"><QuestionMarkIcon size={16} weight="regular" /></span>
         </a>
       </div>
 
-      <div className={`${menuOpen ? 'flex' : 'hidden'} sm:flex flex-col gap-2 overflow-y-auto rounded-3xl bg-black/60 p-2 backdrop-blur-md ring-1 ring-white/10 shadow-2xl`}>
+      <div
+        className={`
+          flex flex-col gap-1 overflow-y-auto rounded bg-black/60 p-1.5 backdrop-blur-md ring-1 ring-white/10 shadow-2xl
+          transition-[opacity,transform,max-height] duration-200 ease-out sm:max-h-[calc(100vh-5rem)] sm:translate-y-0 sm:opacity-100
+          ${menuOpen ? 'max-h-[calc(100vh-5rem)] translate-y-0 opacity-100' : 'max-h-0 -translate-y-2 opacity-0 pointer-events-none sm:pointer-events-auto'}
+        `}
+      >
         {worlds.map(({ slug, world, objectAssets }) => {
           const isActive = slug === activeSlug
           const name = world.display_name || slug
           return (
-            <div key={slug} className="rounded-2xl">
-              <AppButton
-                onClick={() => selectWorld(slug)}
-                active={isActive}
+            <div key={slug} className="rounded">
+              <div
                 className={`
-                  w-full flex items-center gap-3 text-left p-2
-                  ${isActive ? 'border-white/50 bg-white/20 border-2' : ''}
+                  flex items-center gap-1 rounded
+                  ${isActive ? 'border-white/50 bg-white/20' : ''}
                 `}
               >
-                <span className="min-w-0 flex-1">
-                  <span className="block text-white text-sm font-semibold leading-tight truncate">{name}</span>
-                </span>
-              </AppButton>
+                <AppButton
+                  onClick={() => selectWorld(slug)}
+                  active={isActive}
+                  className={`
+                    min-w-0 flex flex-1 items-center gap-2 rounded px-2 py-1.5 text-left
+                    ${isActive ? 'hover:bg-transparent' : ''}
+                  `}
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-white text-sm font-medium leading-tight truncate">{name}</span>
+                  </span>
+                </AppButton>
+                {canOpenLocalFolders && isActive && (
+                  <AppButton
+                    onClick={() => openWorldFolder(slug)}
+                    className="h-8 w-8 flex-shrink-0 justify-center text-white"
+                    aria-label={`Open local folder for ${name}`}
+                  >
+                    <FolderOpenIcon size={15} weight="regular" />
+                  </AppButton>
+                )}
+              </div>
 
               <div
                 className={`
@@ -91,31 +120,25 @@ export function WorldSidebar({ worlds, activeSlug }: Props) {
                   ${isActive ? 'max-h-[32rem]' : 'max-h-0'}
                 `}
               >
-                <div className="mt-1.5 ml-3 pl-3 border-l border-white/10 flex flex-col gap-1">
+                <div className="mt-1 flex flex-col gap-1">
                   <div className="group flex items-center gap-1">
-                    <AppButton
-                      onClick={() => selectWorld(slug)}
-                      className="min-w-0 flex flex-1 items-center gap-2.5 text-left"
+                    <a
+                      href={world.world_marble_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={() => setMenuOpen(false)}
+                      className="min-w-0 flex flex-1 items-center justify-between gap-2 rounded px-2 py-1 text-left text-white opacity-80 transition-[background-color,opacity] hover:bg-white/10 hover:opacity-100"
+                      aria-label={`Open ${name} in World Labs`}
                     >
                       <IconTile thumbnailUrl={world.assets.thumbnail_url} alt={name}>
-                        <GlobeSimple size={18} weight="regular" />
+                        <GlobeSimple size={16} weight="regular" />
                       </IconTile>
                       <span className="min-w-0 flex-1">
                         <span className="block text-white/85 text-xs font-semibold leading-tight truncate">{slug}</span>
                         <span className="block text-white/40 text-[11px] leading-tight truncate">World (.spz)</span>
                       </span>
-                    </AppButton>
-                    {world.world_marble_url && (
-                      <a
-                        href={world.world_marble_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mr-1 w-8 h-8 flex items-center justify-center rounded p-1 text-white opacity-80 hover:bg-white/8 hover:opacity-100 transition-[background-color,opacity] flex-shrink-0"
-                        aria-label={`Open ${name} in World Labs`}
-                      >
-                        <ArrowSquareOut size={16} weight="bold" />
-                      </a>
-                    )}
+                      <ArrowSquareOut size={14} weight="bold" className="flex-shrink-0 text-white/60" />
+                    </a>
                   </div>
                   {objectAssets.map((obj) => (
                     <AppButton
@@ -124,10 +147,10 @@ export function WorldSidebar({ worlds, activeSlug }: Props) {
                         pendingFocusId.current = obj.id
                         setMenuOpen(false)
                       }}
-                      className="flex items-center gap-2.5 text-left group"
+                      className="flex items-center gap-2 text-left group"
                     >
                       <IconTile thumbnailUrl={obj.thumbnailUrl} alt={obj.name}>
-                        <Cube size={18} weight="regular" />
+                        <Cube size={16} weight="regular" />
                       </IconTile>
                       <span className="min-w-0 flex-1">
                         <span className="block text-white/80 group-hover:text-white text-xs font-medium leading-tight truncate transition-colors">

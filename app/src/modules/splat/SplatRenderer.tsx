@@ -110,7 +110,7 @@ export function SplatRenderer({
       }
     })
 
-    const sparkArgs = useMemo(() => ({ renderer }), [renderer])
+    const sparkArgs = useMemo(() => ({ renderer, enableLod: true }), [renderer])
     const splatArgs = useMemo(
       () => ({
         url,

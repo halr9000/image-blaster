@@ -4,6 +4,7 @@ import { ViewerQuality, type WorldEntry } from '../types/world'
 const exampleEntry: WorldEntry = {
   slug: 'example',
   objectAssets: [],
+  worldSfxUrls: [],
   world: {
     world_id: 'test-id',
     display_name: 'Example World',

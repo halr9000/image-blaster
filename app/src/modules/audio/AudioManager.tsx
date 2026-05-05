@@ -1,65 +1,78 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useLoader, useThree } from '@react-three/fiber'
+import * as THREE from 'three'
 import { useAudioStore } from '../../store/audio'
+import { useAudioReady } from './useAudioReady'
 
-const AUDIO_EXTENSIONS = ['.mp3', '.ogg', '.wav', '.m4a']
 const BASE_VOLUME = 0.6
 
 interface Props {
-  slug: string
-  active: boolean
+  urls: string[]
 }
 
-// Fetches the world's output manifest to find audio files, plays them looping.
-// Falls back gracefully if no audio exists.
-export function AudioManager({ slug, active }: Props) {
-  const audioRefs = useRef<HTMLAudioElement[]>([])
+function WorldAudioPlayer({ urls }: Props) {
+  const camera = useThree((state) => state.camera)
+  const muted = useAudioStore((state) => state.muted)
+  const buffers = useLoader(THREE.AudioLoader, urls) as AudioBuffer[]
+  const soundsRef = useRef<THREE.Audio[]>([])
+  const listener = useMemo(() => new THREE.AudioListener(), [])
+
+  const startSounds = useCallback(() => {
+    if (listener.context.state === 'suspended') listener.context.resume().catch(() => {})
+    soundsRef.current.forEach((sound) => {
+      if (!sound.isPlaying) sound.play()
+    })
+  }, [listener])
 
   useEffect(() => {
-    if (!active) {
-      audioRefs.current.forEach((a) => {
-        a.pause()
-        a.src = ''
-      })
-      audioRefs.current = []
-      return
+    camera.add(listener)
+    return () => {
+      listener.removeFromParent()
     }
+  }, [camera, listener])
 
-    // Try to fetch an index of audio files from the output directory.
-    // We probe a manifest.json first; if absent, we silently skip.
-    fetch(`/worlds/${slug}/output/manifest.json`)
-      .then((r) => (r.ok ? r.json() : { audio: [] }))
-      .then((manifest: { audio?: string[] }) => {
-        const files = (manifest.audio ?? []).filter((f) =>
-          AUDIO_EXTENSIONS.some((ext) => f.endsWith(ext)),
-        )
-        const initialMuted = useAudioStore.getState().muted
-        audioRefs.current = files.map((file) => {
-          const audio = new Audio(`/worlds/${slug}/output/${file}`)
-          audio.loop = true
-          audio.volume = initialMuted ? 0 : BASE_VOLUME
-          audio.play().catch(() => {/* autoplay blocked */})
-          return audio
-        })
-      })
-      .catch(() => {})
+  useEffect(() => {
+    const sounds = buffers.map((buffer) => {
+      const sound = new THREE.Audio(listener)
+      sound.setBuffer(buffer)
+      sound.setLoop(true)
+      sound.setVolume(useAudioStore.getState().muted ? 0 : BASE_VOLUME)
+      return sound
+    })
+
+    soundsRef.current = sounds
+    if (!useAudioStore.getState().muted) startSounds()
 
     return () => {
-      audioRefs.current.forEach((a) => {
-        a.pause()
-        a.src = ''
+      sounds.forEach((sound) => {
+        if (sound.isPlaying) sound.stop()
+        sound.disconnect()
       })
-      audioRefs.current = []
+      soundsRef.current = []
     }
-  }, [slug, active])
+  }, [buffers, listener, startSounds])
 
   useEffect(() => {
-    const unsub = useAudioStore.subscribe((s) => {
-      audioRefs.current.forEach((a) => {
-        a.volume = s.muted ? 0 : BASE_VOLUME
-      })
+    soundsRef.current.forEach((sound) => {
+      sound.setVolume(muted ? 0 : BASE_VOLUME)
     })
-    return unsub
-  }, [])
+    if (muted) {
+      soundsRef.current.forEach((sound) => {
+        if (sound.isPlaying) sound.stop()
+      })
+    } else {
+      startSounds()
+    }
+  }, [muted, startSounds])
 
   return null
+}
+
+export function AudioManager({ urls }: Props) {
+  const ready = useAudioReady()
+  const audioKey = urls.join('\0')
+
+  if (!ready || urls.length === 0) return null
+
+  return <WorldAudioPlayer key={audioKey} urls={urls} />
 }

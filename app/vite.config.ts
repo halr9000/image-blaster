@@ -2,6 +2,7 @@ import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 import fs from 'fs'
+import { spawn } from 'child_process'
 
 function worldsPlugin(): Plugin {
   const VIRTUAL_ID = 'virtual:worlds'
@@ -9,7 +10,7 @@ function worldsPlugin(): Plugin {
   const worldsDir = path.resolve(__dirname, '../worlds')
   const RESERVED_OUTPUT_DIRS = new Set(['world', 'sfx'])
   const MODEL_EXTENSIONS = new Set(['.glb'])
-  const AUDIO_EXTENSIONS = new Set(['.mp3', '.ogg', '.wav', '.m4a'])
+  const AUDIO_EXTENSIONS = new Set(['.mp3', '.ogg', '.wav', '.m4a', '.opus'])
   const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.avif'])
 
   function visibleFiles(dir: string) {
@@ -69,6 +70,12 @@ function worldsPlugin(): Plugin {
       })
   }
 
+  function readWorldSfxUrls(slug: string) {
+    return visibleFiles(path.join(worldsDir, slug, 'output', 'sfx'))
+      .filter((file) => AUDIO_EXTENSIONS.has(path.extname(file.name).toLowerCase()))
+      .map((file) => `/worlds/${slug}/output/sfx/${file.name}`)
+  }
+
   function readWorlds() {
     if (!fs.existsSync(worldsDir)) return []
     return fs.readdirSync(worldsDir)
@@ -78,8 +85,27 @@ function worldsPlugin(): Plugin {
       })
       .map((slug) => {
         const raw = fs.readFileSync(path.join(worldsDir, slug, 'output', 'world', 'world.json'), 'utf-8')
-        return { slug, world: JSON.parse(raw), objectAssets: readObjectAssets(slug), sourceImageUrl: readSourceImageUrl(slug) }
+        return {
+          slug,
+          world: JSON.parse(raw),
+          objectAssets: readObjectAssets(slug),
+          sourceImageUrl: readSourceImageUrl(slug),
+          worldSfxUrls: readWorldSfxUrls(slug),
+        }
       })
+  }
+
+  function openFolder(folderPath: string) {
+    const command = process.platform === 'darwin'
+      ? 'open'
+      : process.platform === 'win32'
+        ? 'cmd'
+        : 'xdg-open'
+    const args = process.platform === 'win32'
+      ? ['/c', 'start', '', folderPath]
+      : [folderPath]
+    const child = spawn(command, args, { detached: true, stdio: 'ignore' })
+    child.unref()
   }
 
   return {
@@ -93,7 +119,7 @@ function worldsPlugin(): Plugin {
       }
     },
     handleHotUpdate({ file, server }) {
-      const RELOAD_EXTENSIONS = new Set(['.glb', '.spz', '.mp3', '.ogg', '.wav', '.m4a'])
+      const RELOAD_EXTENSIONS = new Set(['.glb', '.spz', '.mp3', '.ogg', '.wav', '.m4a', '.opus'])
       if (file.startsWith(worldsDir) && RELOAD_EXTENSIONS.has(path.extname(file).toLowerCase())) {
         const mod = server.moduleGraph.getModuleById(RESOLVED_ID)
         if (mod) server.moduleGraph.invalidateModule(mod)
@@ -112,8 +138,30 @@ function worldsPlugin(): Plugin {
         '.ogg': 'audio/ogg',
         '.wav': 'audio/wav',
         '.m4a': 'audio/mp4',
+        '.opus': 'audio/ogg',
         '.json': 'application/json',
       }
+      server.middlewares.use('/__open-world-folder', (req, res) => {
+        const requestUrl = new URL(req.url || '/', 'http://localhost')
+        const slug = requestUrl.searchParams.get('slug')
+        if (!slug) {
+          res.statusCode = 400
+          res.end('Missing slug')
+          return
+        }
+
+        const folderPath = path.resolve(worldsDir, slug)
+        const isInsideWorlds = folderPath === worldsDir || folderPath.startsWith(`${worldsDir}${path.sep}`)
+        if (!isInsideWorlds || !fs.existsSync(folderPath) || !fs.statSync(folderPath).isDirectory()) {
+          res.statusCode = 404
+          res.end('Not found')
+          return
+        }
+
+        openFolder(folderPath)
+        res.statusCode = 204
+        res.end()
+      })
       server.middlewares.use('/worlds', (req, res, next) => {
         const requestPath = decodeURIComponent((req.url || '/').split('?')[0])
         const filePath = path.resolve(worldsDir, `.${requestPath}`)

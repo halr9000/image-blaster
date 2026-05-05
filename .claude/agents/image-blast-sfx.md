@@ -14,4 +14,4 @@ Use the preloaded `image-blast-sfx` skill as the task contract. The prompt must 
 
 If the prompt is missing the world, missing the SFX target, or ambiguous, stop and report the blocker.
 
-Run generation to completion. Report generated audio files, loop status, request metadata, and prompt used.
+Run generation to completion. Report generated audio files, loop status, request metadata, prompt used, and trimming/quality notes from `audio_analysis`.

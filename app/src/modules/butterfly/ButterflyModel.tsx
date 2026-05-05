@@ -4,7 +4,7 @@ import { useGLTF, useTexture, PositionalAudio } from '@react-three/drei'
 import { SkeletonUtils } from 'three-stdlib'
 import * as THREE from 'three'
 import { useButterflyStore } from './store'
-import { useAudioReady } from './useAudioReady'
+import { useAudioReady } from '../audio/useAudioReady'
 import { useAudioStore } from '../../store/audio'
 
 const GLB_URL = '/butterfly/butterfly-loop.glb'

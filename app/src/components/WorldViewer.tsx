@@ -22,9 +22,15 @@ interface Props {
   world: World
   slug: string
   objectAssets: WorldObjectAsset[]
+  worldSfxUrls: string[]
 }
 
-export function WorldViewer({ world: desiredWorld, slug: desiredSlug, objectAssets: desiredObjectAssets }: Props) {
+export function WorldViewer({
+  world: desiredWorld,
+  slug: desiredSlug,
+  objectAssets: desiredObjectAssets,
+  worldSfxUrls,
+}: Props) {
   const charRef = useRef<CharHandle>(null)
   const worldRenderMode = useDebugStore((s) => s.worldRenderMode)
   const objectRenderMode = useDebugStore((s) => s.objectRenderMode)
@@ -54,7 +60,6 @@ export function WorldViewer({ world: desiredWorld, slug: desiredSlug, objectAsse
   const showObjects = worldRenderMode !== WorldRenderMode.SplatOnly
   return (
     <>
-      <AudioManager slug={desiredSlug} active />
       <Canvas
         camera={{ fov: 75, near: 0.1, far: 1000 }}
         className="w-full h-full"
@@ -62,6 +67,7 @@ export function WorldViewer({ world: desiredWorld, slug: desiredSlug, objectAsse
         shadows={isHighQuality}
       >
         <Suspense fallback={null}>
+          <AudioManager urls={worldSfxUrls} />
           <Physics gravity={[0, -9.81, 0]}>
             {controllerMode === 'butterfly' ? (
               <ButterflyController ref={charRef as React.RefObject<ButterflyControllerHandle>} />

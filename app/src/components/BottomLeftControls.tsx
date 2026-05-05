@@ -77,10 +77,10 @@ export function BottomLeftControls() {
   }, [setObjectRenderMode, setWorldRenderMode, setViewerQuality])
 
   const utilBtn =
-    'w-8 h-8 justify-center text-white'
+    'w-8 h-8 justify-center text-white rounded'
 
   const modeBtn = (active: boolean) =>
-    `w-8 h-8 justify-center ${
+    `w-8 h-8 justify-center rounded ${
       active ? 'bg-white/15 text-white' : 'text-white'
     }`
 
@@ -88,23 +88,23 @@ export function BottomLeftControls() {
   const currentWorldMode = WORLD_MODES.find((item) => item.mode === worldRenderMode) ?? WORLD_MODES[0]
 
   return (
-    <div className="flex w-full items-center justify-center gap-1 h-10 rounded-xl px-2 bg-black/55 backdrop-blur-md sm:w-auto">
+    <div className="flex w-full items-center justify-center gap-1 h-10 rounded px-2 bg-black/55 backdrop-blur-md sm:w-auto">
       {/* utility */}
-      <ControlTooltip content={muted ? 'Unmute' : 'Mute'}>
-        <AppButton onClick={toggleMuted} className={utilBtn}>
-          {muted ? <SpeakerSlash size={18} weight="fill" /> : <SpeakerHigh size={18} weight="fill" />}
-        </AppButton>
-      </ControlTooltip>
       <ControlTooltip content="Reset">
         <AppButton onClick={resetObjects} className={utilBtn}>
           <ArrowCounterClockwise size={18} weight="bold" />
+        </AppButton>
+      </ControlTooltip>
+      <ControlTooltip content={muted ? 'Unmute' : 'Mute'}>
+        <AppButton onClick={toggleMuted} className={utilBtn}>
+          {muted ? <SpeakerSlash size={18} weight="fill" /> : <SpeakerHigh size={18} weight="fill" />}
         </AppButton>
       </ControlTooltip>
 
       <div className="w-px h-6 bg-white/15 mx-1" />
 
       {/* world render mode */}
-      <ControlTooltip content="Cycle world render mode">
+      <ControlTooltip content="View scene, objects, or both">
         <AppButton
           onClick={() => setWorldRenderMode(nextMode(WORLD_MODES, worldRenderMode))}
           className={'w-24'}
@@ -134,7 +134,7 @@ export function BottomLeftControls() {
       <div className="w-px h-6 bg-white/15 mx-1" />
 
       {/* viewer quality */}
-      <ControlTooltip content="Cycle quality">
+      <ControlTooltip content="Change quality">
         <AppButton
           onClick={() => setViewerQuality(nextMode(QUALITY_MODES, viewerQuality))}
           className={'w-20'}

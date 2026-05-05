@@ -34,14 +34,21 @@ export function App() {
   const entry = worlds.find((w) => w.slug === slug) ?? worlds[0]
 
   return (
-    <div className="relative w-screen h-screen bg-black overflow-hidden select-none">
+    <div className="relative w-screen h-screen bg-black overflow-hidden select-none [&_*]:focus:outline-none [&_*]:focus-visible:outline-none [&_*]:focus:ring-0 [&_*]:focus-visible:ring-0">
       {LevaPanel && DebugPanel && (
-        <Suspense fallback={null}>
-          <LevaPanel theme={{ sizes: { rootWidth: '380px', controlWidth: '180px' } }} />
-          <DebugPanel />
-        </Suspense>
+        <div className="hidden md:block">
+          <Suspense fallback={null}>
+            <LevaPanel theme={{ sizes: { rootWidth: '380px', controlWidth: '180px' } }} />
+            <DebugPanel />
+          </Suspense>
+        </div>
       )}
-      <WorldViewer world={entry.world} slug={entry.slug} objectAssets={entry.objectAssets} />
+      <WorldViewer
+        world={entry.world}
+        slug={entry.slug}
+        objectAssets={entry.objectAssets}
+        worldSfxUrls={entry.worldSfxUrls}
+      />
       <div className="fixed inset-x-4 top-4 z-10 sm:left-4 sm:right-auto">
         <WorldSidebar worlds={worlds} activeSlug={entry.slug} />
       </div>

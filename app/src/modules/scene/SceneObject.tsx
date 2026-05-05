@@ -189,6 +189,15 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
     sfxRefs.current.length = object.sfxUrls.length
   }, [object.sfxUrls.length])
 
+  useEffect(() => {
+    if (!muted) return
+    sfxRefs.current.forEach((sound) => {
+      if (!sound) return
+      sound.setVolume(0)
+      if (sound.isPlaying) sound.stop()
+    })
+  }, [muted])
+
   const playRandomSfx = useCallback(() => {
     if (muted || object.sfxUrls.length === 0) return
 

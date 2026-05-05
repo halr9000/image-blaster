@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { useButterflyStore } from './store'
-import { useAudioReady } from './useAudioReady'
+import { useAudioReady } from '../audio/useAudioReady'
 import { useAudioStore } from '../../store/audio'
 
 const URL = '/butterfly/sfx/wing-flap-loop.wav'

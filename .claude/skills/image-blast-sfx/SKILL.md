@@ -1,6 +1,6 @@
 ---
 name: image-blast-sfx
-description: Generate a sound effect or ambient sound.
+description: Generate and post-process a clean sound effect, object impact, or ambient loop.
 argument-hint: [world-name] [world ambience, object-id impact, or custom SFX prompt]
 allowed-tools: Read Write Glob Bash(ls *) Bash(node .claude/scripts/project/project-state.mjs *) Bash(node .claude/scripts/sfx/fal-elevenlabs-sfx.mjs *)
 context: fork
@@ -19,8 +19,10 @@ Generate an SFX for project `$0`.
   - Object impact: resolve one object, output to `worlds/$0/output/<object-id>/sfx/`, use `--count 4 --kind object-impact --prefix impact-<object-id> --duration-seconds 1`. Do not use `--loop`.
   - Custom SFX: use the supplied prompt, output to `worlds/$0/output/sfx/` unless an object is clearly specified, use `--kind arbitrary`.
 - Prompt structure:
-  - Object impact: `impact one-shot of <object material description from object.json>`.
-  - World ambience: `ambience loop of <description of only ambient qualities of scene from image.json>`.
+  - Object impact: `isolated dry close-mic foley impact one-shot, sharp transient at the start, short natural decay, no ambience, no reverb tail, no music, no voice: <object material description from object.json> hitting a hard surface`.
+  - World ambience: `seamless ambience loop, steady background bed only, no music, no voices: <description of only ambient qualities of scene from image.json>`.
+  - Custom SFX: keep it literal, short, and isolated unless the user requested ambience or a loop.
+- The script analyzes each returned file with `ffprobe`/`ffmpeg`, trims leading/trailing silence or low noise, normalizes loudness, and stores `audio_analysis` in the hidden request JSON.
 
 ```bash
 node .claude/scripts/project/project-state.mjs --world "$0"
@@ -36,9 +38,10 @@ node .claude/scripts/sfx/fal-elevenlabs-sfx.mjs \
   --count "<1-4>" \
   --kind "<world-ambience|object-impact|arbitrary>" \
   --duration-seconds "<optional 0.5-22>" \
-  --loop "<for world ambience or explicit loop requests>"
+  --loop "<for world ambience or explicit loop requests>" \
+  --postprocess true
 ```
 
 Add `--loop` only for world ambience or explicit looping requests. Avoid music or voices unless explicitly requested.
 
-Final response: report generated audio files, loop status, request metadata, and prompt used.
+Final response: report generated audio files, loop status, request metadata, prompt used, and the trimming/quality notes from `audio_analysis`.

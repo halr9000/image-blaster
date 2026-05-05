@@ -9,7 +9,7 @@ function markReady() {
   ready = true
   const ctx = THREE.AudioContext.getContext()
   if (ctx.state === 'suspended') ctx.resume().catch(() => {})
-  listeners.forEach((l) => l())
+  listeners.forEach((listener) => listener())
   listeners.clear()
 }
 
@@ -17,23 +17,26 @@ if (typeof window !== 'undefined') {
   const events: (keyof WindowEventMap)[] = ['pointerdown', 'keydown', 'touchstart']
   const onGesture = () => {
     markReady()
-    events.forEach((e) => window.removeEventListener(e, onGesture))
+    events.forEach((event) => window.removeEventListener(event, onGesture))
   }
-  events.forEach((e) => window.addEventListener(e, onGesture, { once: false }))
+  events.forEach((event) => window.addEventListener(event, onGesture, { once: false }))
 }
 
 export function useAudioReady(): boolean {
-  const [v, setV] = useState(ready)
+  const [isReady, setIsReady] = useState(ready)
+
   useEffect(() => {
     if (ready) {
-      setV(true)
+      setIsReady(true)
       return
     }
-    const cb = () => setV(true)
-    listeners.add(cb)
+
+    const listener = () => setIsReady(true)
+    listeners.add(listener)
     return () => {
-      listeners.delete(cb)
+      listeners.delete(listener)
     }
   }, [])
-  return v
+
+  return isReady
 }

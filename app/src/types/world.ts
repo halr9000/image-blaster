@@ -42,6 +42,7 @@ export interface WorldEntry {
   world: World
   objectAssets: WorldObjectAsset[]
   sourceImageUrl?: string
+  worldSfxUrls: string[]
 }
 
 export enum WorldRenderMode {

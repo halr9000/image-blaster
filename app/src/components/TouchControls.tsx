@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useDebugStore } from '../store/debug'
 
 interface JoystickState {
   origin: { x: number; y: number } | null
@@ -8,10 +9,17 @@ interface JoystickState {
 const MAX_RADIUS = 40
 
 export function TouchControls() {
+  const controllerMode = useDebugStore((s) => s.controllerMode)
   const [joystick, setJoystick] = useState<JoystickState>({ origin: null, current: null })
   const touchIdRef = useRef<number | null>(null)
 
   useEffect(() => {
+    if (controllerMode !== 'fps') {
+      touchIdRef.current = null
+      setJoystick({ origin: null, current: null })
+      return
+    }
+
     const onStart = (e: TouchEvent) => {
       for (const touch of Array.from(e.changedTouches)) {
         if (touch.clientX < window.innerWidth / 2 && touchIdRef.current === null) {
@@ -51,9 +59,9 @@ export function TouchControls() {
       window.removeEventListener('touchmove', onMove)
       window.removeEventListener('touchend', onEnd)
     }
-  }, [])
+  }, [controllerMode])
 
-  if (!joystick.origin) return null
+  if (controllerMode !== 'fps' || !joystick.origin) return null
 
   const dx = Math.max(-MAX_RADIUS, Math.min(MAX_RADIUS, (joystick.current?.x ?? joystick.origin.x) - joystick.origin.x))
   const dy = Math.max(-MAX_RADIUS, Math.min(MAX_RADIUS, (joystick.current?.y ?? joystick.origin.y) - joystick.origin.y))
