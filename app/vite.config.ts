@@ -326,6 +326,7 @@ function worldsPlugin(): Plugin {
         res.end()
       })
       server.middlewares.use('/__scene-project', (req, res) => {
+        res.setHeader('Cache-Control', 'no-store')
         const requestUrl = new URL(req.url || '/', 'http://localhost')
         const slug = requestUrl.searchParams.get('slug')
         if (!slug) {

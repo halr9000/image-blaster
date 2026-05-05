@@ -94,8 +94,8 @@ export interface PlacementEditorController {
   redo: () => void
   resetEdits: () => void
   openWorldFolder: () => void
-  saveProject: () => Promise<void>
-  confirmLeave: () => boolean
+  saveProject: () => Promise<boolean>
+  setFlushSelectedTransformHandler: (handler: (() => WorldObjectPlacement[] | null) | null) => void
 }
 
 const HISTORY_LIMIT = 80
@@ -262,17 +262,17 @@ export function usePlacementEditor({ slug, objects, allObjectAssets, sceneProjec
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const clipboardRef = useRef<WorldObjectPlacement[]>([])
   const historyRef = useRef<{ past: WorldObjectPlacement[][]; future: WorldObjectPlacement[][] }>({ past: [], future: [] })
-  const lastSavedSignatureRef = useRef(signature(initialPlacements))
   const loadedSlugRef = useRef(slug)
   const selectedIdRef = useRef(selectedId)
   const instancesRef = useRef(instances)
   const dropSelectedToFloorHandlerRef = useRef<(() => void) | null>(null)
+  const flushSelectedTransformHandlerRef = useRef<(() => WorldObjectPlacement[] | null) | null>(null)
 
   const selectedInstance = useMemo(
     () => instances.find((instance) => instance.instanceId === selectedId),
     [instances, selectedId],
   )
-  const dirty = signature(instances) !== lastSavedSignatureRef.current
+  const dirty = signature(instances) !== signature(initialPlacements)
   const canUndo = historyRef.current.past.length > 0
   const canRedo = historyRef.current.future.length > 0
 
@@ -298,14 +298,12 @@ export function usePlacementEditor({ slug, objects, allObjectAssets, sceneProjec
     const next = clonePlacements(initialPlacements)
     const nextSignature = signature(next)
     if (loadedSlugRef.current === slug && nextSignature === signature(instancesRef.current)) {
-      lastSavedSignatureRef.current = nextSignature
       return
     }
     loadedSlugRef.current = slug
     setInstances(next)
     setSelectedId(null)
     historyRef.current = { past: [], future: [] }
-    lastSavedSignatureRef.current = nextSignature
     setSaveStatus('idle')
   }, [initialPlacements, slug])
 
@@ -315,6 +313,10 @@ export function usePlacementEditor({ slug, objects, allObjectAssets, sceneProjec
     setInstances(clonePlacements(next))
     setSaveStatus('idle')
   }, [pushHistory])
+
+  const currentInstances = useCallback(() => (
+    flushSelectedTransformHandlerRef.current?.() ?? instancesRef.current
+  ), [])
 
   const selectInstance = useCallback((event: ThreeEvent<MouseEvent>, instanceId: string) => {
     event.stopPropagation()
@@ -327,9 +329,9 @@ export function usePlacementEditor({ slug, objects, allObjectAssets, sceneProjec
 
   const copySelected = useCallback(() => {
     const selected = selectedIdRef.current
-    const instance = instancesRef.current.find((item) => item.instanceId === selected)
+    const instance = currentInstances().find((item) => item.instanceId === selected)
     clipboardRef.current = instance ? [{ ...instance }] : []
-  }, [])
+  }, [currentInstances])
 
   const pasteInstances = useCallback(() => {
     const copied = clipboardRef.current
@@ -343,9 +345,9 @@ export function usePlacementEditor({ slug, objects, allObjectAssets, sceneProjec
         instance.position[2] + PASTE_OFFSET[2],
       ] as [number, number, number],
     }))
-    updateInstances((current) => [...current, ...pasted])
+    commitInstances([...currentInstances(), ...pasted])
     setSelectedId(pasted[pasted.length - 1]?.instanceId ?? null)
-  }, [updateInstances])
+  }, [commitInstances, currentInstances])
 
   const duplicateSelected = useCallback(() => {
     copySelected()
@@ -353,7 +355,8 @@ export function usePlacementEditor({ slug, objects, allObjectAssets, sceneProjec
   }, [copySelected, pasteInstances])
 
   const duplicateInstance = useCallback((instanceId: string) => {
-    const instance = instancesRef.current.find((item) => item.instanceId === instanceId)
+    const instances = currentInstances()
+    const instance = instances.find((item) => item.instanceId === instanceId)
     if (!instance) return
     const duplicate = {
       ...instance,
@@ -364,9 +367,9 @@ export function usePlacementEditor({ slug, objects, allObjectAssets, sceneProjec
         instance.position[2] + PASTE_OFFSET[2],
       ] as [number, number, number],
     }
-    updateInstances((current) => [...current, duplicate])
+    commitInstances([...instances, duplicate])
     setSelectedId(duplicate.instanceId)
-  }, [updateInstances])
+  }, [commitInstances, currentInstances])
 
   const deleteSelected = useCallback(() => {
     const selected = selectedIdRef.current
@@ -401,6 +404,10 @@ export function usePlacementEditor({ slug, objects, allObjectAssets, sceneProjec
 
   const setDropSelectedToFloorHandler = useCallback((handler: (() => void) | null) => {
     dropSelectedToFloorHandlerRef.current = handler
+  }, [])
+
+  const setFlushSelectedTransformHandler = useCallback((handler: (() => WorldObjectPlacement[] | null) | null) => {
+    flushSelectedTransformHandlerRef.current = handler
   }, [])
 
   const updateSelectedTransform = useCallback((field: TransformField, axis: TransformAxis, value: number) => {
@@ -455,28 +462,27 @@ export function usePlacementEditor({ slug, objects, allObjectAssets, sceneProjec
     })
   }, [slug])
 
-  const confirmLeave = useCallback(() => {
-    if (!dirty) return true
-    return window.confirm('You have unsaved scene changes. Leave without saving?')
-  }, [dirty])
-
   const saveProject = useCallback(async () => {
-    if (!import.meta.env.DEV) return
-    setSaveStatus('saving')
+    if (!import.meta.env.DEV) return true
     try {
-      const project: WorldSceneProject = { version: projectVersion, instances: clonePlacements(instancesRef.current) }
+      const flushedInstances = flushSelectedTransformHandlerRef.current?.()
+      const project: WorldSceneProject = { version: projectVersion, instances: clonePlacements(flushedInstances ?? instancesRef.current) }
+      setSaveStatus('saving')
       const response = await fetch(`/__scene-project?slug=${encodeURIComponent(slug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(project),
       })
       if (!response.ok) throw new Error(await response.text())
-      lastSavedSignatureRef.current = signature(project.instances)
-      onProjectSaved?.(project)
+      const savedProject = await response.json() as WorldSceneProject
+      setInstances(clonePlacements(savedProject.instances))
+      onProjectSaved?.(savedProject)
       setSaveStatus('saved')
+      return true
     } catch (error) {
       console.warn('Failed to save scene project.', error)
       setSaveStatus('error')
+      return false
     }
   }, [onProjectSaved, slug])
 
@@ -488,8 +494,10 @@ export function usePlacementEditor({ slug, objects, allObjectAssets, sceneProjec
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(project),
     })
-      .then((response) => {
-        if (response.ok) onProjectSaved?.(project)
+      .then(async (response) => {
+        if (!response.ok) return
+        const savedProject = await response.json() as WorldSceneProject
+        onProjectSaved?.(savedProject)
       })
       .catch((error) => {
         console.warn('Failed to initialize scene project.', error)
@@ -599,7 +607,7 @@ export function usePlacementEditor({ slug, objects, allObjectAssets, sceneProjec
     resetEdits,
     openWorldFolder,
     saveProject,
-    confirmLeave,
+    setFlushSelectedTransformHandler,
   }
 }
 
@@ -618,7 +626,7 @@ export function PlacementEditorScene({ controller, renderMode }: PlacementEditor
   const bakeSelectedTransform = useCallback(() => {
     const selected = controller.selectedInstance
     const object = selectedObjectRef.current
-    if (!selected || !object) return
+    if (!selected || !object) return null
 
     const next = controller.instances.map((instance) => {
       if (instance.instanceId !== selected.instanceId) return instance
@@ -639,6 +647,7 @@ export function PlacementEditorScene({ controller, renderMode }: PlacementEditor
 
     controller.commitInstances(next)
     dragStartRef.current = null
+    return next
   }, [controller])
 
   useEffect(() => {
@@ -647,13 +656,21 @@ export function PlacementEditorScene({ controller, renderMode }: PlacementEditor
     const captureDragStart = () => {
       dragStartRef.current = controller.selectedInstance ? clonePlacements([controller.selectedInstance])[0] : null
     }
+    const bakeDragEnd = (event: { value?: boolean }) => {
+      if (event.value === false) bakeSelectedTransform()
+    }
     controls.addEventListener('mouseDown', captureDragStart)
-    controls.addEventListener('mouseUp', bakeSelectedTransform)
+    controls.addEventListener('dragging-changed', bakeDragEnd)
     return () => {
       controls.removeEventListener('mouseDown', captureDragStart)
-      controls.removeEventListener('mouseUp', bakeSelectedTransform)
+      controls.removeEventListener('dragging-changed', bakeDragEnd)
     }
   }, [bakeSelectedTransform, controller.selectedInstance])
+
+  useEffect(() => {
+    controller.setFlushSelectedTransformHandler(bakeSelectedTransform)
+    return () => controller.setFlushSelectedTransformHandler(null)
+  }, [bakeSelectedTransform, controller])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -814,26 +831,15 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
       </div>
 
       {selectedInstance && (
-        <ChromePanel className="pointer-events-auto fixed right-4 top-4 w-72 p-2">
+        <ChromePanel className="pointer-events-auto fixed font-mono right-4 top-4 w-72 p-2 whitespace-nowrap">
           <div className="mb-2 min-w-0">
             <div className="truncate text-xs font-medium text-white/90">{selectedAsset?.name ?? selectedInstance.objectId}</div>
             <div className="truncate text-[10px] text-white/35">{selectedInstance.instanceId}</div>
           </div>
           <div className="flex flex-col gap-1">
-            <label className="grid grid-cols-[2.75rem_1fr] items-center gap-1">
-              <span className="text-[10px] uppercase tracking-[0.16em] text-white/40">Physics</span>
-              <select
-                value={selectedInstance.physics ?? 'rigidbody'}
-                onChange={(event) => controller.updateSelectedPhysics(event.currentTarget.value as WorldObjectPhysics)}
-                className="h-7 rounded border border-white/10 bg-black/40 px-1.5 text-xs text-white/85"
-              >
-                <option value="rigidbody">Rigidbody</option>
-                <option value="static">Static</option>
-              </select>
-            </label>
             {TRANSFORM_FIELDS.map(({ field, label, step }) => (
               <div key={field} className="grid grid-cols-[2.75rem_repeat(3,minmax(0,1fr))] items-center gap-1">
-                <div className="text-[10px] uppercase tracking-[0.16em] text-white/40">{label}</div>
+                <div className="text-[10px] tracking-[0.16em] text-white/40">{label}</div>
                 {TRANSFORM_AXES.map(({ axis, label: axisLabel }) => (
                   <label key={`${field}-${axis}`} className="min-w-0">
                     <span className="sr-only">{`${label} ${axisLabel}`}</span>
@@ -857,6 +863,17 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
                 ))}
               </div>
             ))}
+            <label className="grid grid-cols-[2.75rem_1fr] items-center gap-1">
+              <span className="text-[10px] tracking-[0.16em] text-white/40">Body</span>
+              <select
+                value={selectedInstance.physics ?? 'rigidbody'}
+                onChange={(event) => controller.updateSelectedPhysics(event.currentTarget.value as WorldObjectPhysics)}
+                className="h-7 rounded border border-white/10 bg-black/40 px-1.5 text-xs text-white/85"
+              >
+                <option value="rigidbody">Rigidbody</option>
+                <option value="static">Static</option>
+              </select>
+            </label>
           </div>
         </ChromePanel>
       )}
@@ -870,9 +887,9 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
                 className="inline-flex h-8 w-8 items-center justify-center rounded px-2 py-1 text-xs opacity-80 transition-[background-color,opacity] hover:bg-white/10 hover:opacity-100"
                 href={`/${controller.slug}`}
                 aria-label="Return to world"
-                onClick={(event) => {
+                onClick={async (event) => {
                   event.preventDefault()
-                  if (!controller.confirmLeave()) return
+                  if (!await controller.saveProject()) return
                   navigate(`/${controller.slug}`)
                 }}
               >

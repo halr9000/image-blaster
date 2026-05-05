@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react'
+import { Component, forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, type ReactNode } from 'react'
 import { ThreeEvent, useLoader } from '@react-three/fiber'
 import { PositionalAudio } from '@react-three/drei'
 import { CuboidCollider, RigidBody, type RapierRigidBody } from '@react-three/rapier'
@@ -49,6 +49,38 @@ interface MeshMaterialState {
   mesh: THREE.Mesh
   litMaterials: THREE.Material | THREE.Material[]
   colorEntries: Array<{ material: THREE.Material & { color: THREE.Color }; baseColor: THREE.Color }>
+}
+
+interface SfxLoadErrorBoundaryProps {
+  url: string
+  children: ReactNode
+}
+
+interface SfxLoadErrorBoundaryState {
+  hasError: boolean
+}
+
+class SfxLoadErrorBoundary extends Component<SfxLoadErrorBoundaryProps, SfxLoadErrorBoundaryState> {
+  state: SfxLoadErrorBoundaryState = { hasError: false }
+
+  static getDerivedStateFromError(): SfxLoadErrorBoundaryState {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: unknown) {
+    console.warn(`Skipping object SFX "${this.props.url}" because it failed to load.`, error)
+  }
+
+  componentDidUpdate(prevProps: SfxLoadErrorBoundaryProps) {
+    if (prevProps.url !== this.props.url && this.state.hasError) {
+      this.setState({ hasError: false })
+    }
+  }
+
+  render() {
+    if (this.state.hasError) return null
+    return this.props.children
+  }
 }
 
 function cloneMaterial(material: THREE.Material | THREE.Material[]): THREE.Material | THREE.Material[] {
@@ -257,7 +289,9 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
     ref,
     () => ({
       id: object.id,
-      rigidBody: rigidBodyRef.current,
+      get rigidBody() {
+        return rigidBodyRef.current
+      },
       initialPosition,
       initialRotation,
       bounds,
@@ -328,15 +362,16 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
           <primitive object={wireframeOverlayScene} position={offset} dispose={null} />
         )}
         {object.sfxUrls.map((url, index) => (
-          <PositionalAudio
-            key={url}
-            ref={(audio) => {
-              sfxRefs.current[index] = audio
-            }}
-            url={url}
-            distance={2}
-            loop={false}
-          />
+          <SfxLoadErrorBoundary key={url} url={url}>
+            <PositionalAudio
+              ref={(audio) => {
+                sfxRefs.current[index] = audio
+              }}
+              url={url}
+              distance={2}
+              loop={false}
+            />
+          </SfxLoadErrorBoundary>
         ))}
       </group>
     </RigidBody>

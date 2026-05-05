@@ -18,7 +18,7 @@ export function useSceneProject(slug: string, refreshKey: string, bundledScenePr
     setReady(false)
     setSceneProject(undefined)
 
-    fetch(`/__scene-project?slug=${encodeURIComponent(slug)}`)
+    fetch(`/__scene-project?slug=${encodeURIComponent(slug)}`, { cache: 'no-store' })
       .then(async (response) => {
         if (response.ok) return response.json() as Promise<WorldSceneProject>
         if (response.status === 404) return undefined

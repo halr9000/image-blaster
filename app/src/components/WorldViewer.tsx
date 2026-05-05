@@ -95,7 +95,7 @@ export function WorldViewer({
       >
         <Suspense fallback={null}>
           <AudioManager urls={worldSfxUrls} />
-          <Physics gravity={[0, -9.81, 0]}>
+          <Physics key={`${desiredSlug}:${controllerResetToken}`} gravity={[0, -9.81, 0]}>
             {controllerMode === 'fly' ? (
               <FlyController ref={charRef as React.RefObject<FlyControllerHandle>} />
             ) : (
