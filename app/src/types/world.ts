@@ -33,6 +33,10 @@ export interface WorldObjectAsset {
   id: string
   assetId: string
   sourceWorldSlug: string
+  baseObjectId: string
+  index?: number
+  variantLabel?: string
+  fileName?: string
   name: string
   url: string
   thumbnailUrl?: string
@@ -57,9 +61,17 @@ export interface WorldSceneProject {
   instances: WorldObjectPlacement[]
 }
 
+export interface WorldVersion {
+  index: number
+  label: string
+  world: World
+  complete: boolean
+}
+
 export interface WorldEntry {
   slug: string
   world: World
+  worldVersions: WorldVersion[]
   objectAssets: WorldObjectAsset[]
   allObjectAssets: WorldObjectAsset[]
   sourceImageUrl?: string

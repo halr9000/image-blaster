@@ -44,12 +44,16 @@ Use one convention for generated files:
 ```text
 N-slug.ext
 .N-slug-request.json
+.N-slug__scope-request.json
 ```
 
 - `N` is the generation index. `0` is the source/original; higher numbers are derived generations.
 - `slug` is the stable family or asset slug.
-- Hidden request JSON sits beside the file it generated.
+- Hidden request JSON sits beside the file it generated. Use `__scope` when one generation index has multiple request roles, such as image and model requests for the same object.
+- Multi-file generations share one index. A world generation can produce `N-world.json`, `N-world.glb`, `N-world-pano.png`, `N-world-thumbnail.webp`, and `N-world-full_res.spz`.
 - Inspect generated state with `ls -a <directory>` to get state, and read JSON files to get more details.
+- Never overwrite an existing indexed artifact. If you must manually materialize provider URLs already recorded in local JSON, choose the next intended index or the matching existing JSON index, use no-clobber downloads, and write only canonical `N-*` names.
+- Prefer existing materialization helpers for recorded URLs. For world assets, use `node .claude/scripts/world/generate-world.mjs --world <world-slug> --redownload [--index N]` to fill missing local files from an existing `N-world.json` without starting a new generation.
 
 ## Skill Invocation
 
@@ -66,6 +70,15 @@ node .claude/scripts/project/show-folder.mjs worlds/<world-slug>
 
 The helper prints a fallback command for CLI-only environments. It delegates to the OS file manager and may reuse an existing window when the platform does so by default.
 
+When the user needs to inspect one exact file, use the matching path helper:
+
+```bash
+node .claude/scripts/project/show-path.mjs worlds/<world-slug>/source/0-source.png
+node .claude/scripts/project/show-path.mjs --reveal worlds/<world-slug>/source/0-source.png
+```
+
+Use `--reveal` when the user should see the file selected in its containing folder instead of opening the file directly. This helper requires the file or folder to already exist and also prints a fallback command.
+
 ## Generation Scripts Are Synchronous
 
 All generation scripts (`generate-edit.mjs`, `generate-world.mjs`, `generate-single-asset.mjs`, `fal-elevenlabs-sfx.mjs`, etc.) block until the API call completes and print their result to stdout. **Never** run them with `run_in_background: true` or use `tail -f` to monitor their output — just run them directly and read the printed result.
@@ -81,7 +94,7 @@ When doing an IMAGE-BLAST, it can be done in one-shot by following this order:
 5. Create a world with `Agent(image-blast-world)` from the newest source image, which may be the generated plate.
 6. Launch one 3D object agent per confirmed object to create 3D models
 7. Launch SFX agents for ambience and also for every object to create object-specific sounds.
-8. Once all assets are complete, run `bun install && bun run dev` from the repository root, open `http://localhost:5173/<world-slug>` for the user when possible, and report both URLs:
+8. Once all assets are complete, check if something is already running on port 5173. If not, run `bun install && bun run dev` from the repository root. Then, open `http://localhost:5173/<world-slug>` for the user when possible, and report both URLs:
    - `http://localhost:5173/<world-slug>` to view the world.
    - `http://localhost:5173/<world-slug>/edit` to edit object placement.
 

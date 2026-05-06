@@ -13,6 +13,8 @@ function defaultViewerQuality() {
 interface DebugStore {
   viewerQuality: ViewerQuality
   setViewerQuality: (v: ViewerQuality) => void
+  hotReloadEnabled: boolean
+  setHotReloadEnabled: (v: boolean) => void
   worldRenderMode: WorldRenderMode
   setWorldRenderMode: (v: WorldRenderMode) => void
   objectRenderMode: ObjectRenderMode
@@ -73,6 +75,8 @@ export const useDebugStore = create<DebugStore>()(
     (set) => ({
       viewerQuality: defaultViewerQuality(),
       setViewerQuality: (viewerQuality) => set({ viewerQuality }),
+      hotReloadEnabled: true,
+      setHotReloadEnabled: (hotReloadEnabled) => set({ hotReloadEnabled }),
       worldRenderMode: WorldRenderMode.Combined,
       setWorldRenderMode: (worldRenderMode) => set({ worldRenderMode }),
       objectRenderMode: ObjectRenderMode.Lit,
@@ -139,6 +143,7 @@ export const useDebugStore = create<DebugStore>()(
       // Persist user-facing viewer controls so the Leva/debug panel survives reloads.
       partialize: (s) => ({
         viewerQuality: s.viewerQuality,
+        hotReloadEnabled: s.hotReloadEnabled,
         worldRenderMode: s.worldRenderMode,
         objectRenderMode: s.objectRenderMode,
         butterfliesEnabled: s.butterfliesEnabled,

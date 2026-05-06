@@ -145,6 +145,13 @@ function assetKey(asset: WorldObjectAsset) {
   return asset.assetId || `${asset.sourceWorldSlug}/${asset.id}`
 }
 
+function addAssetAliases(map: Map<string, WorldObjectAsset>, asset: WorldObjectAsset) {
+  map.set(asset.id, asset)
+  map.set(assetKey(asset), asset)
+  map.set(asset.baseObjectId, asset)
+  map.set(`${asset.sourceWorldSlug}/${asset.baseObjectId}`, asset)
+}
+
 function placementAssetKey(placement: WorldObjectPlacement) {
   return placement.assetId ?? placement.objectId
 }
@@ -261,8 +268,8 @@ export function usePlacementEditor({ slug, objects, allObjectAssets, sceneProjec
     : allObjectAssets
   const assetsById = useMemo(() => {
     const map = new Map<string, WorldObjectAsset>()
-    for (const asset of allObjectAssets) map.set(assetKey(asset), asset)
-    for (const asset of objects) map.set(asset.id, asset)
+    for (const asset of allObjectAssets) addAssetAliases(map, asset)
+    for (const asset of objects) addAssetAliases(map, asset)
     return map
   }, [allObjectAssets, objects])
   const [instances, setInstances] = useState(() => clonePlacements(initialPlacements))
@@ -953,7 +960,8 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
               <span>Scene Graph</span>
               <span className="normal-case tracking-normal">{controller.selectedId ? '1 selected' : 'None selected'}</span>
             </div>
-            <div className="max-h-[40vh] overflow-y-auto p-1">
+            <div className="max-h-[40vh] overflow-y-auto overflow-x-hidden">
+              <div className="p-1 pr-3">
               {controller.instances.map((instance) => {
                 const asset = controller.assetsById.get(placementAssetKey(instance)) ?? controller.assetsById.get(instance.objectId)
                 const selected = controller.selectedId === instance.instanceId
@@ -970,6 +978,7 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
                       <ChromeThumbnail thumbnailUrl={asset?.thumbnailUrl} alt={asset?.name ?? instance.objectId} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-xs text-white/90">{asset?.name ?? instance.objectId}</span>
+                        {asset?.variantLabel && <span className="block truncate text-[10px] text-white/45">{asset.variantLabel}</span>}
                         <span className="block truncate text-[10px] text-white/35">{instance.instanceId}</span>
                       </span>
                     </button>
@@ -1001,6 +1010,7 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
               {!controller.instances.length && (
                 <div className="px-2 py-4 text-xs text-white/45">No object instances in this scene.</div>
               )}
+              </div>
             </div>
           </ChromePanel>
 
@@ -1030,7 +1040,8 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
                 </AppButton>
               </div>
             </div>
-            <div className="max-h-[28vh] overflow-y-auto p-1">
+            <div className="max-h-[28vh] overflow-y-auto overflow-x-hidden">
+              <div className="p-1 pr-3">
               {controller.visibleAssetLibrary.map((asset) => (
                 <div
                   key={assetKey(asset)}
@@ -1044,7 +1055,9 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
                     <ChromeThumbnail thumbnailUrl={asset.thumbnailUrl} alt={asset.name} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-xs text-white/90">{asset.name}</span>
-                      <span className="block truncate text-[10px] text-white/35">{asset.sourceWorldSlug}</span>
+                      <span className="block truncate text-[10px] text-white/35">
+                        {[asset.sourceWorldSlug, asset.variantLabel].filter(Boolean).join(' / ')}
+                      </span>
                     </span>
                   </button>
                   <AppButton
@@ -1060,6 +1073,7 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
               {!controller.visibleAssetLibrary.length && (
                 <div className="px-2 py-4 text-xs text-white/45">No object assets found.</div>
               )}
+              </div>
             </div>
           </ChromePanel>
         </div>

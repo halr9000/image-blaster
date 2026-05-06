@@ -25,6 +25,7 @@ function worldsPlugin(): Plugin {
   const PROJECT_VERSION = 1
   const WORLD_SPZ_KEYS = new Set(['100k', '150k', '500k', 'full_res'])
   let activeWorldSlug: string | null = null
+  let hotReloadEnabled = true
 
   function visibleFiles(dir: string) {
     if (!fs.existsSync(dir)) return []
@@ -51,10 +52,17 @@ function worldsPlugin(): Plugin {
       .filter((entry) => entry.isDirectory() && !RESERVED_OUTPUT_DIRS.has(entry.name))
       .flatMap((entry) => {
         const objectDir = path.join(outputDir, entry.name)
-        const model = visibleFiles(objectDir)
-          .find((file) => MODEL_EXTENSIONS.has(path.extname(file.name).toLowerCase()))
+        const files = visibleFiles(objectDir)
+        const models = files
+          .map((file) => ({ file, indexed: parseIndexedName(file.name) }))
+          .filter(({ file }) => MODEL_EXTENSIONS.has(path.extname(file.name).toLowerCase()))
+          .sort((a, b) => {
+            const aIndex = a.indexed?.index ?? Number.MAX_SAFE_INTEGER
+            const bIndex = b.indexed?.index ?? Number.MAX_SAFE_INTEGER
+            return aIndex - bIndex || a.file.name.localeCompare(b.file.name)
+          })
 
-        if (!model) return []
+        if (!models.length) return []
 
         const objectJsonPath = path.join(objectDir, 'object.json')
         let displayName = entry.name
@@ -67,21 +75,35 @@ function worldsPlugin(): Plugin {
           }
         }
 
-        const thumbnail = visibleFiles(objectDir).find(
-          (file) => IMAGE_EXTENSIONS.has(path.extname(file.name).toLowerCase()) && file.name.includes('thumbnail'),
-        )
+        const thumbnailFor = (index?: number) => {
+          const sameIndexImages = files.filter((file) => {
+            if (!IMAGE_EXTENSIONS.has(path.extname(file.name).toLowerCase())) return false
+            const parsed = parseIndexedName(file.name)
+            return index === undefined || parsed?.index === index
+          })
+          return sameIndexImages.find((file) => file.name.includes('thumbnail')) ?? sameIndexImages[0]
+        }
 
-        return [{
-          id: entry.name,
-          assetId: `${slug}/${entry.name}`,
-          sourceWorldSlug: slug,
-          name: displayName,
-          url: `/worlds/${slug}/output/${entry.name}/${model.name}`,
-          thumbnailUrl: thumbnail ? `/worlds/${slug}/output/${entry.name}/${thumbnail.name}` : undefined,
-          sfxUrls: visibleFiles(path.join(objectDir, 'sfx'))
-            .filter((file) => AUDIO_EXTENSIONS.has(path.extname(file.name).toLowerCase()))
-            .map((file) => `/worlds/${slug}/output/${entry.name}/sfx/${file.name}`),
-        }]
+        return models.map(({ file, indexed }) => {
+          const index = indexed?.index
+          const variantLabel = index === undefined ? path.basename(file.name, path.extname(file.name)) : `v${index}`
+          const thumbnail = thumbnailFor(index)
+          return {
+            id: index === undefined ? entry.name : `${entry.name}-${index}`,
+            assetId: index === undefined ? `${slug}/${entry.name}` : `${slug}/${entry.name}/${index}`,
+            sourceWorldSlug: slug,
+            baseObjectId: entry.name,
+            ...(index === undefined ? {} : { index }),
+            variantLabel,
+            fileName: file.name,
+            name: displayName,
+            url: `/worlds/${slug}/output/${entry.name}/${file.name}`,
+            thumbnailUrl: thumbnail ? `/worlds/${slug}/output/${entry.name}/${thumbnail.name}` : undefined,
+            sfxUrls: visibleFiles(path.join(objectDir, 'sfx'))
+              .filter((file) => AUDIO_EXTENSIONS.has(path.extname(file.name).toLowerCase()))
+              .map((file) => `/worlds/${slug}/output/${entry.name}/sfx/${file.name}`),
+          }
+        })
       })
   }
 
@@ -103,24 +125,167 @@ function worldsPlugin(): Plugin {
     return key.replace(/[^a-z0-9_-]/gi, '_')
   }
 
-  function withLocalWorldAssets(slug: string, world: WorldManifest) {
+  function parseIndexedName(fileName: string) {
+    const match = fileName.match(/^(\d+)-(.+?)(\.[^.]+)$/)
+    if (!match) return undefined
+    return {
+      index: Number(match[1]),
+      slug: match[2],
+      extension: match[3],
+      name: fileName,
+    }
+  }
+
+  function latestIndexedFile(files: fs.Dirent[], slug: string, extension?: string) {
+    return files
+      .map((file) => parseIndexedName(file.name))
+      .filter((entry): entry is NonNullable<ReturnType<typeof parseIndexedName>> => {
+        if (!entry) return false
+        return entry.slug === slug && (!extension || entry.extension === extension)
+      })
+      .sort((a, b) => b.index - a.index)[0]
+  }
+
+  function latestNamedFile(files: fs.Dirent[], predicate: (entry: NonNullable<ReturnType<typeof parseIndexedName>>) => boolean) {
+    return files
+      .map((file) => parseIndexedName(file.name))
+      .filter((entry): entry is NonNullable<ReturnType<typeof parseIndexedName>> => {
+        if (!entry) return false
+        return predicate(entry)
+      })
+      .sort((a, b) => b.index - a.index)[0]?.name
+  }
+
+  function fallbackWorldAssetFilename(files: fs.Dirent[], indexedPredicate: (name: string) => boolean, legacyPredicate: (name: string) => boolean) {
+    return localWorldAssetFilename(files, indexedPredicate)
+      ?? localWorldAssetFilename(files, legacyPredicate)
+  }
+
+  function emptyWorldManifest(slug: string, project?: Record<string, unknown>): WorldManifest {
+    return {
+      world_id: slug,
+      display_name: String(project?.display_name || slug),
+      world_marble_url: '',
+      tags: null,
+      world_prompt: null,
+      created_at: typeof project?.created_at === 'string' ? project.created_at : null,
+      updated_at: null,
+      assets: {
+        mesh: { collider_mesh_url: '' },
+        imagery: { pano_url: '' },
+        splats: {
+          spz_urls: {},
+          semantics_metadata: {
+            metric_scale_factor: 1,
+            ground_plane_offset: 0,
+            flip_y: true,
+          },
+        },
+        thumbnail_url: '',
+        caption: '',
+      },
+    }
+  }
+
+  function readProjectManifest(slug: string) {
+    const projectPath = path.join(worldsDir, slug, 'project.json')
+    if (!fs.existsSync(projectPath) || !fs.statSync(projectPath).isFile()) return undefined
+    try {
+      const project = JSON.parse(fs.readFileSync(projectPath, 'utf-8')) as Record<string, unknown>
+      return emptyWorldManifest(slug, project)
+    } catch {
+      return emptyWorldManifest(slug)
+    }
+  }
+
+  function readWorldManifest(slug: string) {
+    const worldDir = path.join(worldsDir, slug, 'output', 'world')
+    const files = visibleFiles(worldDir)
+    const latestWorld = latestIndexedFile(files, 'world', '.json')
+    const legacyWorld = localWorldAssetFilename(files, (name) => name === 'world.json')
+    const worldFile = latestWorld?.name ?? legacyWorld
+
+    if (worldFile) {
+      const raw = fs.readFileSync(path.join(worldDir, worldFile), 'utf-8')
+      return {
+        world: JSON.parse(raw) as WorldManifest,
+        index: latestWorld?.index,
+      }
+    }
+
+    const projectWorld = readProjectManifest(slug)
+    return projectWorld ? { world: projectWorld, index: undefined } : undefined
+  }
+
+  function readWorldManifestForIndex(slug: string, index: number) {
+    const worldDir = path.join(worldsDir, slug, 'output', 'world')
+    const indexedPath = path.join(worldDir, `${index}-world.json`)
+    if (fs.existsSync(indexedPath) && fs.statSync(indexedPath).isFile()) {
+      return JSON.parse(fs.readFileSync(indexedPath, 'utf-8')) as WorldManifest
+    }
+
+    const legacyPath = path.join(worldDir, 'world.json')
+    if (index === 0 && fs.existsSync(legacyPath) && fs.statSync(legacyPath).isFile()) {
+      return JSON.parse(fs.readFileSync(legacyPath, 'utf-8')) as WorldManifest
+    }
+
+    return readProjectManifest(slug) ?? emptyWorldManifest(slug)
+  }
+
+  function withLocalWorldAssets(slug: string, world: WorldManifest, index?: number) {
     const files = visibleFiles(path.join(worldsDir, slug, 'output', 'world'))
     const existingSpzUrls = world.assets?.splats?.spz_urls ?? {}
     const spzUrls: Record<string, string> = {}
 
     for (const key of Object.keys(existingSpzUrls)) {
-      const filename = localWorldAssetFilename(files, (name) => name === `0-world-${assetKeyForFilename(key)}.spz`)
+      const assetKey = assetKeyForFilename(key)
+      const filename = index === undefined
+        ? latestNamedFile(files, (entry) => entry.slug === `world-${assetKey}` && entry.extension === '.spz')
+          ?? localWorldAssetFilename(files, (name) => name === `0-world-${assetKey}.spz`)
+        : fallbackWorldAssetFilename(
+          files,
+          (name) => name === `${index}-world-${assetKey}.spz`,
+          (name) => name === `0-world-${assetKey}.spz`,
+        )
       if (filename) spzUrls[key] = worldAssetUrl(slug, filename)
     }
 
     for (const file of files) {
-      const match = file.name.match(/^0-world-(100k|150k|500k|full_res)\.spz$/)
-      if (match && WORLD_SPZ_KEYS.has(match[1])) spzUrls[match[1]] = worldAssetUrl(slug, file.name)
+      const match = file.name.match(/^(\d+)-world-(100k|150k|500k|full_res)\.spz$/)
+      if (match && (index === undefined || Number(match[1]) === index) && WORLD_SPZ_KEYS.has(match[2])) {
+        spzUrls[match[2]] = worldAssetUrl(slug, file.name)
+        continue
+      }
+      const legacyMatch = file.name.match(/^0-world-(100k|150k|500k|full_res)\.spz$/)
+      if (legacyMatch && index !== undefined && WORLD_SPZ_KEYS.has(legacyMatch[1]) && !spzUrls[legacyMatch[1]]) {
+        spzUrls[legacyMatch[1]] = worldAssetUrl(slug, file.name)
+        continue
+      }
+      const keyOnlyMatch = file.name.match(/^world-(100k|150k|500k|full_res)\.spz$/)
+      if (keyOnlyMatch && WORLD_SPZ_KEYS.has(keyOnlyMatch[1]) && !spzUrls[keyOnlyMatch[1]]) {
+        spzUrls[keyOnlyMatch[1]] = worldAssetUrl(slug, file.name)
+      }
     }
 
-    const collider = localWorldAssetFilename(files, (name) => name === '0-world.glb')
-    const pano = localWorldAssetFilename(files, (name) => /^0-world-pano\.(png|jpe?g|webp|avif)$/i.test(name))
-    const thumbnail = localWorldAssetFilename(files, (name) => /^0-world-thumbnail\.(png|jpe?g|webp|avif)$/i.test(name))
+    const collider = index === undefined
+      ? latestNamedFile(files, (entry) => entry.slug === 'world' && entry.extension === '.glb') ?? localWorldAssetFilename(files, (name) => name === '0-world.glb')
+      : fallbackWorldAssetFilename(files, (name) => name === `${index}-world.glb`, (name) => name === '0-world.glb')
+    const pano = index === undefined
+      ? latestNamedFile(files, (entry) => entry.slug === 'world-pano' && IMAGE_EXTENSIONS.has(entry.extension.toLowerCase()))
+        ?? localWorldAssetFilename(files, (name) => /^0-world-pano\.(png|jpe?g|webp|avif)$/i.test(name))
+      : fallbackWorldAssetFilename(
+        files,
+        (name) => new RegExp(`^${index}-world-pano\\.(png|jpe?g|webp|avif)$`, 'i').test(name),
+        (name) => /^0-world-pano\.(png|jpe?g|webp|avif)$/i.test(name),
+      )
+    const thumbnail = index === undefined
+      ? latestNamedFile(files, (entry) => entry.slug === 'world-thumbnail' && IMAGE_EXTENSIONS.has(entry.extension.toLowerCase()))
+        ?? localWorldAssetFilename(files, (name) => /^0-world-thumbnail\.(png|jpe?g|webp|avif)$/i.test(name))
+      : fallbackWorldAssetFilename(
+        files,
+        (name) => new RegExp(`^${index}-world-thumbnail\\.(png|jpe?g|webp|avif)$`, 'i').test(name),
+        (name) => /^0-world-thumbnail\.(png|jpe?g|webp|avif)$/i.test(name),
+      )
 
     return {
       ...world,
@@ -137,10 +302,53 @@ function worldsPlugin(): Plugin {
         splats: {
           ...(world.assets?.splats ?? {}),
           spz_urls: spzUrls,
+          semantics_metadata: {
+            metric_scale_factor: 1,
+            ground_plane_offset: 0,
+            flip_y: true,
+            ...((world.assets?.splats?.semantics_metadata ?? {}) as Record<string, unknown>),
+          },
         },
         thumbnail_url: worldAssetUrl(slug, thumbnail),
       },
     }
+  }
+
+  function worldAssetIndexes(slug: string) {
+    const files = visibleFiles(path.join(worldsDir, slug, 'output', 'world'))
+    const indexes = new Set<number>()
+    for (const file of files) {
+      const parsed = parseIndexedName(file.name)
+      if (!parsed) continue
+      if (
+        parsed.slug === 'world' ||
+        parsed.slug === 'world-pano' ||
+        parsed.slug === 'world-thumbnail' ||
+        /^world-(100k|150k|500k|full_res)$/.test(parsed.slug)
+      ) {
+        indexes.add(parsed.index)
+      }
+    }
+    if (files.some((file) => file.name === 'world.json')) indexes.add(0)
+    return [...indexes].sort((a, b) => a - b)
+  }
+
+  function readWorldVersions(slug: string) {
+    const indexes = worldAssetIndexes(slug)
+    const projectWorld = readProjectManifest(slug)
+    if (!indexes.length && projectWorld) indexes.push(0)
+
+    return indexes.map((index) => {
+      const world = withLocalWorldAssets(slug, readWorldManifestForIndex(slug, index), index)
+      const colliderUrl = String(world.assets?.mesh?.collider_mesh_url || '')
+      const spzUrls = world.assets?.splats?.spz_urls ?? {}
+      return {
+        index,
+        label: `v${index}`,
+        world,
+        complete: Boolean(colliderUrl && Object.keys(spzUrls).length),
+      }
+    })
   }
 
   function sceneProjectPath(slug: string) {
@@ -193,7 +401,7 @@ function worldsPlugin(): Plugin {
     const relative = path.relative(worldsDir, file)
     if (relative.startsWith('..') || path.isAbsolute(relative)) return false
     const parts = relative.split(path.sep)
-    return parts.length === 4 && parts[1] === 'output' && parts[2] === 'world' && parts[3] === 'world.json'
+    return parts.length === 4 && parts[1] === 'output' && parts[2] === 'world' && (parts[3] === 'world.json' || /^\d+-world\.json$/.test(parts[3]))
   }
 
   function worldSlugForFile(file: string) {
@@ -206,14 +414,18 @@ function worldsPlugin(): Plugin {
     if (!fs.existsSync(worldsDir)) return []
     const entries = fs.readdirSync(worldsDir)
       .filter((slug) => {
-        const f = path.join(worldsDir, slug, 'output', 'world', 'world.json')
-        return fs.existsSync(f) && fs.statSync(f).isFile()
+        const worldDir = path.join(worldsDir, slug)
+        return fs.statSync(worldDir).isDirectory() && Boolean(readWorldManifest(slug))
       })
       .map((slug) => {
-        const raw = fs.readFileSync(path.join(worldsDir, slug, 'output', 'world', 'world.json'), 'utf-8')
+        const manifest = readWorldManifest(slug)
+        if (!manifest) throw new Error(`No world manifest or project.json found for ${slug}`)
+        const worldVersions = readWorldVersions(slug)
+        const defaultWorld = worldVersions.at(-1)?.world ?? withLocalWorldAssets(slug, manifest.world, manifest.index)
         return {
           slug,
-          world: withLocalWorldAssets(slug, JSON.parse(raw)),
+          world: defaultWorld,
+          worldVersions,
           objectAssets: readObjectAssets(slug),
           allObjectAssets: [],
           sourceImageUrl: readSourceImageUrl(slug),
@@ -254,6 +466,7 @@ function worldsPlugin(): Plugin {
       if (!worldSlug) return
       const shouldReloadWorldsModule = RELOAD_EXTENSIONS.has(path.extname(file).toLowerCase()) && !isSceneProjectFile(file)
       if (!shouldReloadWorldsModule) return
+      if (!hotReloadEnabled) return []
       if (activeWorldSlug !== null && worldSlug !== activeWorldSlug && !isWorldCatalogFile(file)) return []
       if (shouldReloadWorldsModule) {
         const mod = server.moduleGraph.getModuleById(RESOLVED_ID)
@@ -302,26 +515,66 @@ function worldsPlugin(): Plugin {
         res.statusCode = 204
         res.end()
       })
+      server.middlewares.use('/__hot-reload', (req, res) => {
+        const requestUrl = new URL(req.url || '/', 'http://localhost')
+        const enabled = requestUrl.searchParams.get('enabled')
+        if (enabled !== 'true' && enabled !== 'false') {
+          res.statusCode = 400
+          res.end('Missing enabled')
+          return
+        }
+
+        hotReloadEnabled = enabled === 'true'
+        res.statusCode = 204
+        res.end()
+      })
       server.middlewares.use('/__open-world-folder', (req, res) => {
         const requestUrl = new URL(req.url || '/', 'http://localhost')
         const slug = requestUrl.searchParams.get('slug')
         const target = requestUrl.searchParams.get('target')
+        const asset = requestUrl.searchParams.get('asset')
         if (!slug) {
           res.statusCode = 400
           res.end('Missing slug')
           return
         }
 
-        const folderPath = path.resolve(worldsDir, slug, target === 'scene' ? 'scene' : '.')
-        const isInsideWorlds = folderPath === worldsDir || folderPath.startsWith(`${worldsDir}${path.sep}`)
+        const worldDir = path.resolve(worldsDir, slug)
+        const isInsideWorlds = worldDir !== worldsDir && worldDir.startsWith(`${worldsDir}${path.sep}`)
         if (!isInsideWorlds) {
           res.statusCode = 404
           res.end('Not found')
           return
         }
 
-        fs.mkdirSync(folderPath, { recursive: true })
-        openFolder(folderPath)
+        const folderPath = (() => {
+          if (target === 'scene') return path.join(worldDir, 'scene')
+          if (target === 'world-asset') return path.join(worldDir, 'output', 'world')
+          if (target === 'object-asset') return asset ? path.join(worldDir, 'output', asset) : undefined
+          return worldDir
+        })()
+        if (!folderPath) {
+          res.statusCode = 400
+          res.end('Missing asset')
+          return
+        }
+        const resolvedFolderPath = path.resolve(folderPath)
+        const isInsideWorld = resolvedFolderPath === worldDir || resolvedFolderPath.startsWith(`${worldDir}${path.sep}`)
+        if (!isInsideWorld) {
+          res.statusCode = 404
+          res.end('Not found')
+          return
+        }
+
+        if (target === 'scene') {
+          fs.mkdirSync(resolvedFolderPath, { recursive: true })
+        } else if (!fs.existsSync(resolvedFolderPath) || !fs.statSync(resolvedFolderPath).isDirectory()) {
+          res.statusCode = 404
+          res.end('Not found')
+          return
+        }
+
+        openFolder(resolvedFolderPath)
         res.statusCode = 204
         res.end()
       })

@@ -16,4 +16,4 @@ The prompt must include one world slug and may include one image path or world p
 
 If the prompt is missing the world or asks for multiple worlds, stop and report the blocker.
 
-Run generation or resume polling to completion. Report the source image used when relevant, the world output path, app route, and any failure/resume metadata.
+Run generation or resume polling to completion. Report the source image used when relevant, generation index, world output path, app route, and any failure/resume metadata.

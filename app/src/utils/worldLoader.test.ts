@@ -28,6 +28,33 @@ const exampleEntry: WorldEntry = {
       caption: 'A test world',
     },
   },
+  worldVersions: [{
+    index: 0,
+    label: 'v0',
+    complete: true,
+    world: {
+      world_id: 'test-id',
+      display_name: 'Example World',
+      world_marble_url: '',
+      tags: null,
+      world_prompt: null,
+      created_at: null,
+      updated_at: null,
+      assets: {
+        imagery: { pano_url: '/worlds/example/output/world/0-world-pano.png' },
+        mesh: { collider_mesh_url: '/worlds/example/output/world/0-world.glb' },
+        splats: {
+          spz_urls: {
+            '500k': '/worlds/example/output/world/0-world-500k.spz',
+            '150k': '/worlds/example/output/world/0-world-150k.spz',
+          },
+          semantics_metadata: { metric_scale_factor: 1.0, ground_plane_offset: 0.5 },
+        },
+        thumbnail_url: '/worlds/example/output/world/0-world-thumbnail.webp',
+        caption: 'A test world',
+      },
+    },
+  }],
 }
 
 vi.mock('virtual:worlds', () => ({ default: [exampleEntry] }))

@@ -14,6 +14,7 @@ import {
   artifactPath,
   isHiddenRequestMetadata,
   isVisibleFile,
+  latestIndexed,
   parseIndexedName
 } from "../asset-pipeline/request-metadata.mjs";
 
@@ -70,6 +71,11 @@ function isSourceAnalysis(filePath) {
 function isVisibleGeneratedFile(filePath) {
   const fileName = path.basename(filePath);
   return !isHiddenRequestMetadata(filePath) && isVisibleFile(filePath) && fileName !== "sfx.json";
+}
+
+function isWorldRequest(filePath) {
+  const parsed = parseIndexedName(filePath);
+  return parsed?.hidden && parsed.slug === "world";
 }
 
 async function nextAvailablePath(filePath) {
@@ -194,12 +200,12 @@ export async function ensureProjectState(options) {
 
   const staged_files = stageInput ? await stageInputFiles(worldDir, inputDir) : [];
   const imagePath = path.join(worldDir, "image.json");
-  const worldJsonPath = path.join(worldDir, "output", "world", "world.json");
-  const operationJsonPath = path.join(worldDir, "output", "world", "operation.json");
+  const worldOutputPath = path.join(worldDir, "output", "world");
   const worldSfxPath = path.join(worldDir, "output", "sfx");
   const scenePath = path.join(worldDir, "scene", "project.json");
   const objects = await scanObjects(worldDir);
   const sourceFiles = await listDirFiles(path.join(worldDir, "source"));
+  const worldOutputFiles = await listDirFiles(worldOutputPath);
   const sourceImageFiles = sourceFiles.filter(isSourceImage);
   const sourceAnalysisFiles = sourceFiles.filter(isSourceAnalysis);
   const worldSfxFiles = (await listDirFiles(worldSfxPath)).filter(isVisibleGeneratedFile);
@@ -221,8 +227,8 @@ export async function ensureProjectState(options) {
       image: imagePath
     },
     state: {
-      has_world: await pathExists(worldJsonPath),
-      has_world_operation: await pathExists(operationJsonPath),
+      has_world: Boolean(await latestIndexed(worldOutputPath, "world")) || await pathExists(path.join(worldOutputPath, "world.json")),
+      has_world_operation: worldOutputFiles.some(isWorldRequest) || await pathExists(path.join(worldOutputPath, "operation.json")),
       has_image: await pathExists(imagePath),
       source_image_count: sourceImageFiles.length,
       source_analysis_count: sourceAnalysisFiles.length,

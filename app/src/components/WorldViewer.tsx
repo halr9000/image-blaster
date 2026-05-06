@@ -82,6 +82,7 @@ interface Props {
   sceneProject?: WorldSceneProject
   sceneProjectReady?: boolean
   editing?: boolean
+  uiVisible?: boolean
   onSceneProjectSaved?: (project: WorldSceneProject) => void
 }
 
@@ -94,6 +95,7 @@ export function WorldViewer({
   sceneProject,
   sceneProjectReady = true,
   editing = false,
+  uiVisible = true,
   onSceneProjectSaved,
 }: Props) {
   const charRef = useRef<CharHandle>(null)
@@ -128,6 +130,7 @@ export function WorldViewer({
   const showScene = worldRenderMode !== WorldRenderMode.ObjectOnly
   const showSplat = showScene && objectRenderMode === ObjectRenderMode.Lit
   const showObjects = worldRenderMode !== WorldRenderMode.SplatOnly
+  const showSceneProjectObjects = Boolean(sceneProject)
   const placementEditor = usePlacementEditor({
     slug: desiredSlug,
     objects: desiredObjectAssets,
@@ -164,7 +167,7 @@ export function WorldViewer({
             )}
             {showObjects && !editing && (
               <Suspense fallback={null}>
-                <ObjectGrid objects={objectPhysicsAssets} placements={objectPlacements} />
+                <ObjectGrid objects={objectPhysicsAssets} placements={objectPlacements} floatingGrid={!showSceneProjectObjects} />
               </Suspense>
             )}
             {showObjects && editing && (
@@ -211,7 +214,7 @@ export function WorldViewer({
           {isHighQuality && <PostProcessing />}
         </Suspense>
       </Canvas>
-      {editing && <PlacementEditorOverlay controller={placementEditor} />}
+      {editing && uiVisible && <PlacementEditorOverlay controller={placementEditor} />}
     </>
   )
 }

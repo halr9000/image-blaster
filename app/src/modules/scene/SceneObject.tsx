@@ -1,5 +1,5 @@
 import { Component, forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, type ReactNode } from 'react'
-import { ThreeEvent, useLoader } from '@react-three/fiber'
+import { ThreeEvent, useFrame, useLoader } from '@react-three/fiber'
 import { PositionalAudio } from '@react-three/drei'
 import { CuboidCollider, RigidBody, type RapierRigidBody } from '@react-three/rapier'
 import * as THREE from 'three'
@@ -10,6 +10,7 @@ import { useAudioStore } from '../../store/audio'
 import { useAssetMaterials, SHADED_COLOR, HOVER_DIM_FACTOR } from './useAssetMaterials'
 
 export const OBJECT_SCALE = 0.5
+const OBJECT_AUTO_ROTATE_Y_SPEED = 0.35
 
 const COLLIDER_WIREFRAME_COLOR = 0x00aaff
 
@@ -36,6 +37,7 @@ interface Props {
   scale?: [number, number, number]
   physics?: WorldObjectPhysics
   renderMode: ObjectRenderMode
+  autoRotateY?: boolean
   isHovered: boolean
   onHover: HoverHandler
   onClick?: ClickHandler
@@ -104,6 +106,7 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
     scale = [1, 1, 1],
     physics = 'rigidbody',
     renderMode,
+    autoRotateY = false,
     isHovered,
     onHover,
     onClick,
@@ -115,6 +118,7 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
   ref,
 ) {
   const rigidBodyRef = useRef<RapierRigidBody>(null)
+  const visualGroupRef = useRef<THREE.Group>(null)
   const colliderProxyRef = useRef<THREE.Mesh>(null)
   const sfxRefs = useRef<Array<THREE.PositionalAudio | null>>([])
   const lastSfxIndexRef = useRef<number | null>(null)
@@ -220,6 +224,11 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
       }
     }
   }, [isHovered, materialStates, renderMode, wireframeMaterial, shadedMaterial])
+
+  useFrame((_, delta) => {
+    if (!autoRotateY || !visualGroupRef.current) return
+    visualGroupRef.current.rotation.y += delta * OBJECT_AUTO_ROTATE_Y_SPEED
+  })
 
   useEffect(() => {
     const hiddenHitbox = renderMode === ObjectRenderMode.Lit
@@ -362,7 +371,7 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
           colliderHalfExtents.z * scale[2] * 2,
         ]} />
       </mesh>
-      <group scale={[OBJECT_SCALE * scale[0], OBJECT_SCALE * scale[1], OBJECT_SCALE * scale[2]]}>
+      <group ref={visualGroupRef} scale={[OBJECT_SCALE * scale[0], OBJECT_SCALE * scale[1], OBJECT_SCALE * scale[2]]}>
         <primitive object={scene} position={offset} dispose={null} />
         {renderMode === ObjectRenderMode.ShadedWireframe && (
           <primitive object={wireframeOverlayScene} position={offset} dispose={null} />

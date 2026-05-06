@@ -13,7 +13,14 @@ import {
   requireEnv,
   writeJson
 } from "../asset-pipeline/fal-queue.mjs";
-import { isVisibleFile, parseIndexedName } from "../asset-pipeline/request-metadata.mjs";
+import {
+  artifactPath,
+  isVisibleFile,
+  latestIndexed,
+  nextIndex,
+  parseIndexedName,
+  requestPath
+} from "../asset-pipeline/request-metadata.mjs";
 
 const ENDPOINT = "https://api.worldlabs.ai/marble/v1";
 const MODEL = "marble-1.1";
@@ -39,31 +46,31 @@ function assetKeyForFilename(key) {
   return String(key).replace(/[^a-z0-9_-]/gi, "_");
 }
 
-async function downloadWorldAssets(worldResponse, outputDir) {
+async function downloadWorldAssets(worldResponse, outputDir, index) {
   const assets = worldResponse.assets || {};
   const result = { spz: {} };
 
   const glbUrl = assets.mesh?.collider_mesh_url;
   if (glbUrl) {
-    result.glb = await downloadAsset(glbUrl, path.join(outputDir, "0-world.glb"));
+    result.glb = await downloadAsset(glbUrl, path.join(outputDir, `${index}-world.glb`));
   }
 
   const panoUrl = assets.imagery?.pano_url;
   if (panoUrl) {
     const ext = extensionFromUrl(panoUrl, ".png");
-    result.pano = await downloadAsset(panoUrl, path.join(outputDir, `0-world-pano${ext}`));
+    result.pano = await downloadAsset(panoUrl, path.join(outputDir, `${index}-world-pano${ext}`));
   }
 
   const thumbnailUrl = assets.thumbnail_url;
   if (thumbnailUrl) {
     const ext = extensionFromUrl(thumbnailUrl, ".webp");
-    result.thumbnail = await downloadAsset(thumbnailUrl, path.join(outputDir, `0-world-thumbnail${ext}`));
+    result.thumbnail = await downloadAsset(thumbnailUrl, path.join(outputDir, `${index}-world-thumbnail${ext}`));
   }
 
   const spzUrls = assets.splats?.spz_urls || {};
   for (const [key, url] of Object.entries(spzUrls)) {
     if (!url) continue;
-    result.spz[key] = await downloadAsset(url, path.join(outputDir, `0-world-${assetKeyForFilename(key)}.spz`));
+    result.spz[key] = await downloadAsset(url, path.join(outputDir, `${index}-world-${assetKeyForFilename(key)}.spz`));
   }
 
   return result;
@@ -167,7 +174,7 @@ async function buildRequest({ world, image, prompt }) {
   };
 }
 
-async function submitWorld(request, operationPath) {
+async function submitWorld(request) {
   const apiKey = await requireEnv("WORLD_LABS_API_KEY");
   const response = await fetch(`${ENDPOINT}/worlds:generate`, {
     method: "POST",
@@ -183,7 +190,6 @@ async function submitWorld(request, operationPath) {
     throw new Error(`World Labs submit failed (${response.status}): ${JSON.stringify(stripBase64(body))}`);
   }
 
-  await writeJson(operationPath, stripBase64(body));
   return body;
 }
 
@@ -193,7 +199,73 @@ function operationId(operation) {
   return String(id).split("/").at(-1);
 }
 
-async function pollOperation(operation, operationPath, pollIntervalMs) {
+function requestStatus(operation) {
+  if (operation?.error) return "failed";
+  return operation?.done ? "completed" : "running";
+}
+
+async function writeWorldRequest(metadataPath, metadata) {
+  await writeJson(metadataPath, {
+    schema_version: 1,
+    kind: "world",
+    provider: "world-labs",
+    endpoint: ENDPOINT,
+    model: MODEL,
+    ...metadata,
+    result: stripBase64(metadata.result)
+  });
+}
+
+async function worldRequests(outputDir) {
+  const entries = await readdir(outputDir, { withFileTypes: true }).catch(() => []);
+  const requests = [];
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const parsed = parseIndexedName(entry.name);
+    if (!parsed?.hidden || parsed.slug !== "world") continue;
+    const request = await readJsonIfExists(path.join(outputDir, entry.name));
+    if (!request) continue;
+    requests.push({ index: parsed.index, path: path.join(outputDir, entry.name), data: request });
+  }
+  return requests.sort((a, b) => b.index - a.index);
+}
+
+function isActiveRequest(request) {
+  return request?.data?.request_id && !["completed", "failed", "cancelled", "canceled"].includes(request.data.status);
+}
+
+async function latestWorldArtifact(outputDir) {
+  const indexed = await latestIndexed(outputDir, "world");
+  if (indexed) return indexed;
+
+  const legacyPath = path.join(outputDir, "world.json");
+  if (await pathExists(legacyPath)) {
+    return { index: 0, path: legacyPath, name: "world.json", legacy: true };
+  }
+
+  return undefined;
+}
+
+async function worldArtifactForIndex(outputDir, index) {
+  const indexedPath = path.join(outputDir, `${index}-world.json`);
+  if (await pathExists(indexedPath)) {
+    return { index, path: indexedPath, name: path.basename(indexedPath) };
+  }
+
+  const legacyPath = path.join(outputDir, "world.json");
+  if (index === 0 && (await pathExists(legacyPath))) {
+    return { index: 0, path: legacyPath, name: "world.json", legacy: true };
+  }
+
+  return undefined;
+}
+
+async function nextWorldIndex(outputDir) {
+  const indexed = await nextIndex(outputDir, "world");
+  return indexed === 0 && (await pathExists(path.join(outputDir, "world.json"))) ? 1 : indexed;
+}
+
+async function pollOperation(operation, metadataPath, baseMetadata, pollIntervalMs) {
   const apiKey = await requireEnv("WORLD_LABS_API_KEY");
   let current = operation;
   const id = operationId(current);
@@ -210,10 +282,45 @@ async function pollOperation(operation, operationPath, pollIntervalMs) {
       throw new Error(`World Labs poll failed (${response.status}): ${JSON.stringify(stripBase64(body))}`);
     }
     current = body;
-    await writeJson(operationPath, stripBase64(current));
+    await writeWorldRequest(metadataPath, {
+      ...baseMetadata,
+      status: requestStatus(current),
+      result: current
+    });
   }
 
   return current;
+}
+
+export async function redownloadWorldAssets(options) {
+  const {
+    world,
+    index
+  } = options;
+
+  if (!world) throw new Error("world is required.");
+
+  const outputDir = `worlds/${world}/output/world`;
+  await ensureDir(outputDir);
+
+  const artifact = index === undefined
+    ? await latestWorldArtifact(outputDir)
+    : await worldArtifactForIndex(outputDir, Number(index));
+  if (!artifact) {
+    throw new Error(index === undefined
+      ? `No world JSON found in ${outputDir}.`
+      : `No world JSON found for index ${index} in ${outputDir}.`);
+  }
+
+  const worldJson = await readJson(artifact.path);
+  const downloaded = await downloadWorldAssets(worldJson, outputDir, artifact.index);
+  return {
+    world,
+    index: artifact.index,
+    redownloaded: true,
+    world_json: artifact.path,
+    ...downloaded
+  };
 }
 
 export async function generateWorld(options) {
@@ -228,31 +335,65 @@ export async function generateWorld(options) {
   if (!world) throw new Error("world is required.");
 
   const outputDir = `worlds/${world}/output/world`;
-  const operationPath = path.join(outputDir, "operation.json");
-  const worldPath = path.join(outputDir, "world.json");
   await ensureDir(outputDir);
 
-  if ((await pathExists(worldPath)) && !regenerate) {
-    const existingWorld = await readJson(worldPath);
-    const downloaded = await downloadWorldAssets(existingWorld, outputDir);
+  const existingWorld = regenerate ? undefined : await latestWorldArtifact(outputDir);
+  if (existingWorld) {
+    const existingWorldJson = await readJson(existingWorld.path);
+    const downloaded = await downloadWorldAssets(existingWorldJson, outputDir, existingWorld.index);
     return {
       world,
+      index: existingWorld.index,
       skipped: true,
-      skip_reason: "world.json already exists. Pass --regenerate to create a new world.",
-      world_json: worldPath,
-      operation_json: operationPath,
+      skip_reason: `${existingWorld.name} already exists. Pass --regenerate to create a new world.`,
+      world_json: existingWorld.path,
       ...downloaded
     };
   }
 
-  const existingOperation = regenerate ? undefined : await readJsonIfExists(operationPath);
-  const operation = existingOperation && !existingOperation.done
-    ? existingOperation
-    : await submitWorld(await buildRequest({ world, image, prompt }), operationPath);
+  const activeRequest = regenerate ? undefined : (await worldRequests(outputDir)).find(isActiveRequest);
+  const requestIndex = activeRequest?.index ?? await nextWorldIndex(outputDir);
+  const metadataPath = activeRequest?.path ?? requestPath(outputDir, requestIndex, "world");
+  const worldPath = artifactPath(outputDir, requestIndex, "world", ".json");
+  const request = activeRequest?.data?.request || await buildRequest({ world, image, prompt });
+  const submittedAt = activeRequest?.data?.submitted_at || new Date().toISOString();
+  const inputFiles = image ? [image] : [];
+  const textPrompt = prompt || request.world_prompt?.text_prompt || request.world_prompt?.image_prompt?.text_prompt;
+  const baseMetadata = {
+    index: requestIndex,
+    status: "submitted",
+    request_id: activeRequest?.data?.request_id,
+    submitted_at: submittedAt,
+    prompt: textPrompt,
+    input_files: inputFiles,
+    output_files: [],
+    downloaded_files: [],
+    request: stripBase64(request)
+  };
+  const operation = activeRequest?.data?.result || await submitWorld(request);
+  const requestId = operationId(operation);
 
-  const completed = await pollOperation(operation, operationPath, Number(pollIntervalMs));
+  await writeWorldRequest(metadataPath, {
+    ...baseMetadata,
+    request_id: requestId,
+    status: requestStatus(operation),
+    result: operation
+  });
+
+  const completed = await pollOperation(operation, metadataPath, {
+    ...baseMetadata,
+    request_id: requestId
+  }, Number(pollIntervalMs));
 
   if (completed.error) {
+    await writeWorldRequest(metadataPath, {
+      ...baseMetadata,
+      request_id: requestId,
+      status: "failed",
+      completed_at: new Date().toISOString(),
+      result: completed,
+      error: completed.error
+    });
     throw new Error(`World Labs generation failed: ${JSON.stringify(completed.error)}`);
   }
   if (!completed.response) {
@@ -261,12 +402,28 @@ export async function generateWorld(options) {
 
   await writeJson(worldPath, completed.response);
 
-  const downloaded = await downloadWorldAssets(completed.response, outputDir);
+  const downloaded = await downloadWorldAssets(completed.response, outputDir, requestIndex);
+  const downloadedFiles = [
+    downloaded.glb,
+    downloaded.pano,
+    downloaded.thumbnail,
+    ...Object.values(downloaded.spz)
+  ].filter(Boolean);
+  await writeWorldRequest(metadataPath, {
+    ...baseMetadata,
+    request_id: requestId,
+    status: "completed",
+    completed_at: new Date().toISOString(),
+    output_files: [worldPath],
+    downloaded_files: downloadedFiles,
+    result: completed
+  });
 
   return {
     world,
+    index: requestIndex,
     operation_id: operationId(completed),
-    operation_json: operationPath,
+    request_metadata: metadataPath,
     world_json: worldPath,
     ...downloaded,
     route: `/${world}`
@@ -277,7 +434,16 @@ async function main() {
   const { flags } = parseArgs();
   const world = one(flags, "world");
   if (!world) {
-    throw new Error("Usage: node generate-world.mjs --world <world-name> [--image <path-or-url>] [--prompt <text>] [--regenerate]");
+    throw new Error("Usage: node generate-world.mjs --world <world-name> [--image <path-or-url>] [--prompt <text>] [--regenerate] [--redownload] [--index N]");
+  }
+
+  if (flags.redownload || flags.materialize) {
+    const result = await redownloadWorldAssets({
+      world,
+      index: one(flags, "index")
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return;
   }
 
   const prompt = [...many(flags, "prompt"), ...many(flags, "description")].join("\n").trim() || undefined;
