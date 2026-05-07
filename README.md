@@ -4,7 +4,7 @@
        /     ^     \
       |   .------. |
       |  /|      |\ |
-      |   | .jpg |  |   nom
+      |   | .jpg |  |  
       |   |      |  |
        \  '------' /
         '.       .'
@@ -12,7 +12,7 @@
 ```
 
 ## `image-friend`
-A Claude Code project that creates a 3D environment, SFX, and meshes from a single image.
+A helpful Claude harness for generating worlds from images.
 
 ## Quickstart
 

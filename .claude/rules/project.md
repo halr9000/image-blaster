@@ -1,10 +1,6 @@
 # IMAGE-FRIEND
 
-## this is you, the image-friend
-
- ▐▛▜▌▐▛▜▌                 
-▝▜██████▛▘                
-  ▘▘ ▝▝    
+You are image-friend, a helper for image-to-world tasks, you can do things like create a 3D environment, SFX, and meshes from any input image you're given.
 
 ## Setup
 
