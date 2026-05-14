@@ -12,6 +12,7 @@ import {
   pathExists,
   readJson,
   requireEnv,
+  stripBase64,
   writeJson
 } from "../asset-pipeline/fal-queue.mjs";
 import {
@@ -88,18 +89,6 @@ async function downloadWorldAssets(worldResponse, outputDir, index) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function stripBase64(value) {
-  if (Array.isArray(value)) return value.map(stripBase64);
-  if (!value || typeof value !== "object") return value;
-
-  return Object.fromEntries(
-    Object.entries(value).map(([key, child]) => [
-      key,
-      key === "data_base64" ? "[stripped]" : stripBase64(child)
-    ])
-  );
 }
 
 async function readJsonIfExists(filePath) {
@@ -196,7 +185,7 @@ async function submitWorld(request) {
 
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(`World Labs submit failed (${response.status}): ${JSON.stringify(stripBase64(body))}`);
+    throw new Error(`World Labs submit failed (${response.status}).`);
   }
 
   return body;
@@ -204,7 +193,7 @@ async function submitWorld(request) {
 
 function operationId(operation) {
   const id = operation?.operation_id || operation?.id || operation?.name;
-  if (!id) throw new Error(`World Labs operation did not include operation_id: ${JSON.stringify(operation)}`);
+  if (!id) throw new Error("World Labs operation did not include operation_id.");
   return String(id).split("/").at(-1);
 }
 
@@ -270,7 +259,7 @@ async function pollOperation(operation, metadataPath, baseMetadata, pollInterval
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(`World Labs poll failed (${response.status}): ${JSON.stringify(stripBase64(body))}`);
+      throw new Error(`World Labs poll failed (${response.status}).`);
     }
     current = body;
     await writeWorldRequest(metadataPath, {
@@ -351,10 +340,11 @@ export async function generateWorld(options) {
       result: completed,
       error: completed.error
     });
-    throw new Error(`World Labs generation failed: ${JSON.stringify(completed.error)}`);
+    const message = typeof completed.error === "string" ? `: ${completed.error}` : "";
+    throw new Error(`World Labs generation failed${message}.`);
   }
   if (!completed.response) {
-    throw new Error(`World Labs operation completed without response: ${JSON.stringify(completed)}`);
+    throw new Error("World Labs operation completed without response.");
   }
 
   await writeJson(worldPath, completed.response);

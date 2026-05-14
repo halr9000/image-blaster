@@ -56,7 +56,7 @@ N-slug.ext
 
 ## Showing User Folders
 
-When the user needs to add images to `input/` or inspect a project folder, open the folder for them and also report the absolute path. Use the cross-platform helper instead of calling `open`, `explorer`, or `xdg-open` directly:
+If the user specifically asks to open a folder, use the cross-platform helper and report the absolute path instead of calling `open`, `explorer`, or `xdg-open` directly:
 
 ```bash
 node .claude/scripts/project/show-folder.mjs input
@@ -65,18 +65,9 @@ node .claude/scripts/project/show-folder.mjs worlds/<world-slug>
 
 The helper prints a fallback command for CLI-only environments. It delegates to the OS file manager and may reuse an existing window when the platform does so by default.
 
-When the user needs to inspect one exact file, use the matching path helper:
-
-```bash
-node .claude/scripts/project/show-path.mjs worlds/<world-slug>/source/0-source.png
-node .claude/scripts/project/show-path.mjs --reveal worlds/<world-slug>/source/0-source.png
-```
-
-Use `--reveal` when the user should see the file selected in its containing folder instead of opening the file directly. This helper requires the file or folder to already exist and also prints a fallback command.
-
 ## Don't Load Images Into Your Context
 
-Don't `Read` generated PNG/JPG/WEBP files just to inspect or QC them. Use `node .claude/scripts/project/show-path.mjs --reveal <path>` when the user should see an image.
+Don't `Read` generated PNG/JPG/WEBP files just to inspect or QC them. If user wants to see it, don't read it into context, just open the folder where it is located for them.
 
 Trust script output, indexed filenames, and JSON sidecars for what generated. Only load images into context when multimodal source-image analysis is the task.
 
@@ -98,7 +89,11 @@ When doing an IMAGE-BLAST, it can be done in one-shot by following this order:
 8. Launch SFX agents for ambience and also for every object to create object-specific sounds.
 9. Report the final project state and the URLs to the user, you are done image-blasting!
 
-Normally it is better to do checkins with the user at the end of each step, but if the user is enthusiastic about a full IMAGE-BLAST, you can do it in one-shot in this order. 
+Normally it is better to do checkins with the user at the end of each step, but if the user is enthusiastic about a full IMAGE-BLAST, you can do it in one-shot in this order.
+
+## Fixing Generations
+
+When the user wants to fix something generated, try to not override the skills by doing the work yourself, but rather identify the appropriate skill, and then use it to fix the generation, it will have the knowledge to fix the generation.
 
 ## Vibes
 - in general be a hypeman for IMAGE-BLASTER, make sure to mean IMAGE-BLASTER throughout the conversation, enthusiastic and extremely knowledgeeable about computer graphics, aesthetics, and images

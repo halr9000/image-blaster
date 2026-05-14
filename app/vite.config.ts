@@ -24,6 +24,14 @@ type ProjectManifest = Record<string, unknown> & {
 
 type RequestManifest = Record<string, unknown> & {
   status?: string
+  input_files?: unknown
+  request?: Record<string, unknown> & {
+    world_prompt?: Record<string, unknown> & {
+      image_prompt?: Record<string, unknown> & {
+        uri?: unknown
+      }
+    }
+  }
 }
 
 type FileWithName = { name: string }
@@ -134,6 +142,7 @@ function worldsPlugin(): Plugin {
   const VIRTUAL_ID = 'virtual:worlds'
   const RESOLVED_ID = '\0' + VIRTUAL_ID
   const WORLD_CHANGE_EVENT = 'worlds-changed'
+  const repoRoot = path.resolve(__dirname, '..')
   const worldsDir = path.resolve(__dirname, '../worlds')
   const RESERVED_OUTPUT_DIRS = new Set(['world', 'sfx'])
   const MODEL_EXTENSIONS = new Set(['.glb'])
@@ -273,6 +282,39 @@ function worldsPlugin(): Plugin {
 
   function worldAssetUrl(slug: string, filename?: string) {
     return filename ? worldsUrl(slug, path.join('output', 'world', filename)) : ''
+  }
+
+  function httpImageUrl(value: unknown) {
+    if (typeof value !== 'string') return undefined
+    try {
+      const url = new URL(value)
+      return url.protocol === 'http:' || url.protocol === 'https:' ? value : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  function localWorldsFileUrl(value: unknown) {
+    if (typeof value !== 'string' || httpImageUrl(value)) return undefined
+
+    const resolvedPath = path.resolve(repoRoot, value)
+    const relativePath = path.relative(worldsDir, resolvedPath)
+    if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) return undefined
+    if (!fs.existsSync(resolvedPath) || !fs.statSync(resolvedPath).isFile()) return undefined
+
+    const [worldSlug, ...worldRelativeParts] = relativePath.split(path.sep)
+    if (!worldSlug || !worldRelativeParts.length) return undefined
+    return worldsUrl(worldSlug, worldRelativeParts.join(path.sep))
+  }
+
+  function requestPlateImageUrl(request?: RequestManifest) {
+    const inputFiles = Array.isArray(request?.input_files) ? request.input_files : []
+    for (const inputFile of inputFiles) {
+      const imageUrl = localWorldsFileUrl(inputFile) ?? httpImageUrl(inputFile)
+      if (imageUrl) return imageUrl
+    }
+
+    return httpImageUrl(request?.request?.world_prompt?.image_prompt?.uri)
   }
 
   function assetKeyForFilename(key: string) {
@@ -427,7 +469,7 @@ function worldsPlugin(): Plugin {
       const colliderUrl = String(world?.assets?.mesh?.collider_mesh_url || '')
       const spzUrls = world?.assets?.splats?.spz_urls ?? {}
       const plate = worldAssetFilename(files, index, 'world-plate', IMAGE_EXTENSIONS)
-      const plateImageUrl = plate ? worldAssetUrl(slug, plate) : undefined
+      const plateImageUrl = plate ? worldAssetUrl(slug, plate) : requestPlateImageUrl(request?.data)
       const requestStatus = statusText(request?.data.status)
       const complete = Boolean(world && colliderUrl && Object.keys(spzUrls).length)
       return {
@@ -465,7 +507,12 @@ function worldsPlugin(): Plugin {
 
       if (typeof instanceId !== 'string' || typeof objectId !== 'string') return []
       if (assetId !== undefined && typeof assetId !== 'string') return []
-      if (physics !== undefined && physics !== 'rigidbody' && physics !== 'static') return []
+      if (
+        physics !== undefined &&
+        physics !== 'rigidbody' &&
+        physics !== 'static' &&
+        physics !== 'ghost'
+      ) return []
       if (!isVec3(position) || !isVec3(rotation) || !isVec3(scale)) return []
       return [{ instanceId, objectId, ...(assetId ? { assetId } : {}), physics: physics ?? 'rigidbody', position, rotation, scale }]
     })
@@ -483,6 +530,15 @@ function worldsPlugin(): Plugin {
     })()
     const metricScaleFactor = record.metricScaleFactor
     const groundPlaneOffset = record.groundPlaneOffset
+    const groundPlaneColliderEnabled = record.groundPlaneColliderEnabled
+    const shadowCatcherOpacity = record.shadowCatcherOpacity
+    const normalizedShadowCatcherOpacity = typeof shadowCatcherOpacity === 'number' && Number.isFinite(shadowCatcherOpacity)
+      ? Math.min(Math.max(shadowCatcherOpacity, 0), 1)
+      : undefined
+    const shadowCatcherColor = record.shadowCatcherColor
+    const normalizedShadowCatcherColor = typeof shadowCatcherColor === 'string' && /^#[0-9a-f]{6}$/i.test(shadowCatcherColor)
+      ? shadowCatcherColor.toLowerCase()
+      : undefined
 
     return {
       version: PROJECT_VERSION,
@@ -490,6 +546,9 @@ function worldsPlugin(): Plugin {
       ...(sun ? { sun } : {}),
       ...(typeof metricScaleFactor === 'number' && Number.isFinite(metricScaleFactor) ? { metricScaleFactor } : {}),
       ...(typeof groundPlaneOffset === 'number' && Number.isFinite(groundPlaneOffset) ? { groundPlaneOffset } : {}),
+      ...(typeof groundPlaneColliderEnabled === 'boolean' ? { groundPlaneColliderEnabled } : {}),
+      ...(normalizedShadowCatcherOpacity !== undefined ? { shadowCatcherOpacity: normalizedShadowCatcherOpacity } : {}),
+      ...(normalizedShadowCatcherColor !== undefined ? { shadowCatcherColor: normalizedShadowCatcherColor } : {}),
     }
   }
 
@@ -584,6 +643,32 @@ function worldsPlugin(): Plugin {
     child.unref()
   }
 
+  function shellQuote(value: string) {
+    return `'${value.replace(/'/g, `'"'"'`)}'`
+  }
+
+  function appleScriptString(value: string) {
+    return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+  }
+
+  function openClaudeTerminal() {
+    if (process.platform !== 'darwin') return false
+
+    const command = `cd ${shellQuote(repoRoot)} && claude`
+    const child = spawn('osascript', [
+      '-e',
+      'tell application "Terminal"',
+      '-e',
+      `do script "${appleScriptString(command)}"`,
+      '-e',
+      'activate',
+      '-e',
+      'end tell',
+    ], { detached: true, stdio: 'ignore' })
+    child.unref()
+    return true
+  }
+
   return {
     name: 'worlds',
     resolveId(id) {
@@ -626,11 +711,28 @@ function worldsPlugin(): Plugin {
         res.setHeader('Content-Type', 'application/json')
         res.end(JSON.stringify(readWorlds()))
       })
+      server.middlewares.use('/__open-claude-terminal', (_req, res) => {
+        if (!openClaudeTerminal()) {
+          res.statusCode = 501
+          res.end('Opening Claude terminal is only supported on macOS.')
+          return
+        }
+
+        res.statusCode = 204
+        res.end()
+      })
       server.middlewares.use('/__open-world-folder', (req, res) => {
         const requestUrl = new URL(req.url || '/', 'http://localhost')
         const slug = requestUrl.searchParams.get('slug')
         const target = requestUrl.searchParams.get('target')
         const asset = requestUrl.searchParams.get('asset')
+        if (target === 'root') {
+          openFolder(repoRoot)
+          res.statusCode = 204
+          res.end()
+          return
+        }
+
         if (!slug) {
           res.statusCode = 400
           res.end('Missing slug')

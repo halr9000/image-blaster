@@ -100,12 +100,18 @@ export async function pathExists(filePath) {
 }
 
 export async function readJson(filePath) {
-  return JSON.parse(await readFile(filePath, "utf8"));
+  const value = JSON.parse(await readFile(filePath, "utf8"));
+  return isRequestMetadataPath(filePath) ? stripBase64(value) : value;
+}
+
+function isRequestMetadataPath(filePath) {
+  return /-request\.json$/i.test(path.basename(filePath || ""));
 }
 
 export async function writeJson(filePath, value) {
   await ensureDir(path.dirname(filePath));
-  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
+  const output = isRequestMetadataPath(filePath) ? stripBase64(value) : value;
+  await writeFile(filePath, `${JSON.stringify(output, null, 2)}\n`);
 }
 
 export function slugify(value) {
@@ -245,23 +251,33 @@ export async function downloadRemoteFiles(result, outputDir, prefix = "file") {
   return downloaded;
 }
 
-export function sanitizeForMetadata(value) {
+function isBase64Field(key) {
+  return /base64|b64/i.test(String(key || ""));
+}
+
+export function stripBase64(value, key = "") {
   if (typeof value === "string") {
-    return isDataUri(value) ? "[inline-data-uri]" : value;
+    if (isDataUri(value) || isBase64Field(key)) return "[stripped]";
+    return value;
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => sanitizeForMetadata(item));
+    return value.map((item) => stripBase64(item, key));
   }
 
   if (value && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value).map(([key, child]) => [key, sanitizeForMetadata(child)])
+      Object.entries(value).map(([childKey, child]) => [
+        childKey,
+        stripBase64(child, childKey)
+      ])
     );
   }
 
   return value;
 }
+
+export const sanitizeForMetadata = stripBase64;
 
 async function updateMetadata(metadataPath, patch) {
   if (!metadataPath) return;
@@ -296,15 +312,15 @@ export async function submitFalQueue(endpoint, input, options = {}) {
   const submitBody = await submitResponse.json().catch(() => ({}));
 
   if (!submitResponse.ok) {
-    throw new Error(`FAL submit failed (${submitResponse.status}): ${JSON.stringify(submitBody)}`);
+    throw new Error(`FAL submit failed (${submitResponse.status}).`);
   }
 
   const requestId = submitBody.request_id;
   if (!requestId) {
-    throw new Error(`FAL submit response did not include request_id: ${JSON.stringify(submitBody)}`);
+    throw new Error("FAL submit response did not include request_id.");
   }
 
-  const submitted = {
+  const submitted = stripBase64({
     ...metadata,
     endpoint,
     request_id: requestId,
@@ -312,7 +328,7 @@ export async function submitFalQueue(endpoint, input, options = {}) {
     submitted_at: submittedAt,
     status_url: submitBody.status_url,
     response_url: submitBody.response_url
-  };
+  });
 
   await updateMetadata(metadataPath, submitted);
   if (onSubmit) await onSubmit(submitted);
@@ -343,7 +359,7 @@ export async function pollFalQueue(endpoint, requestId, options = {}) {
     statusBody = await statusResponse.json().catch(() => ({}));
 
     if (!statusResponse.ok) {
-      throw new Error(`FAL status failed (${statusResponse.status}): ${JSON.stringify(statusBody)}`);
+      throw new Error(`FAL status failed (${statusResponse.status}).`);
     }
 
     const statusPatch = {
@@ -358,7 +374,8 @@ export async function pollFalQueue(endpoint, requestId, options = {}) {
 
     if (statusBody.status === "COMPLETED") {
       if (statusBody.error) {
-        throw new Error(`FAL request failed: ${statusBody.error}`);
+        const message = typeof statusBody.error === "string" ? `: ${statusBody.error}` : "";
+        throw new Error(`FAL request failed${message}.`);
       }
       break;
     }
@@ -386,7 +403,7 @@ export async function getFalQueueResult(endpoint, requestId, options = {}) {
   });
   const resultBody = await resultResponse.json().catch(() => ({}));
   if (!resultResponse.ok) {
-    throw new Error(`FAL result failed (${resultResponse.status}): ${JSON.stringify(resultBody)}`);
+    throw new Error(`FAL result failed (${resultResponse.status}).`);
   }
 
   await updateMetadata(metadataPath, {

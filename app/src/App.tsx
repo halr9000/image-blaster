@@ -2,13 +2,14 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { useRoute, useLocation, Redirect } from 'wouter'
 import { WorldViewer } from './components/WorldViewer'
 import { WorldSidebar } from './components/WorldSidebar'
-import { BottomLeftControls } from './components/BottomLeftControls'
+import { BottomLeftControls, ViewerModeHotkeys } from './components/BottomLeftControls'
 import { TouchControls } from './components/TouchControls'
 import { useSceneProject } from './modules/scene/useSceneProject'
 import { fetchWorlds, loadWorlds } from './utils/worldLoader'
 import { useDebugStore } from './store/debug'
 import { isEditableTarget } from './utils/dom'
 import type { WorldEntry, WorldHoverPreview, WorldObjectAsset } from './types/world'
+import { TerminalWindowIcon } from '@phosphor-icons/react'
 
 const LevaPanel = import.meta.env.DEV
   ? lazy(() => import('leva').then((module) => ({ default: module.Leva })))
@@ -97,12 +98,15 @@ function LoadedApp({
   const entry = worlds.find((w) => w.slug === slug) ?? worlds[0]
   const editing = Boolean(editMatch)
   const showLeva = import.meta.env.VITE_SHOW_LEVA === 'true'
-  const uiVisible = !showLeva || !uiHidden
+  const uiVisible = !uiHidden
   const defaultWorldVersionIndex = entry.worldVersions[entry.worldVersions.length - 1]?.index
   const activeWorldVersionIndex = selectedWorldVersions[entry.slug] ?? defaultWorldVersionIndex
-  const activeWorld = entry.worldVersions.find((version) => version.index === activeWorldVersionIndex)?.world ?? entry.world
+  const activeWorldVersion = entry.worldVersions.find((version) => version.index === activeWorldVersionIndex)
+  const activeWorld = activeWorldVersion?.world ?? entry.world
   const renderableObjectAssets = entry.objectAssets.filter((asset) => asset.complete && asset.url)
   const renderableAllObjectAssets = entry.allObjectAssets.filter((asset) => asset.complete && asset.url)
+  const hasSidebarWorldRow = Boolean(activeWorldVersion || (activeWorld && Object.values(activeWorld.assets.splats.spz_urls).some(Boolean)))
+  const emptyWorld = !hasSidebarWorldRow && !entry.objectAssets.length
   const { sceneProject, sceneProjectReady, updateSceneProject } = useSceneProject(entry.slug, location, entry.sceneProject)
   const sceneProjectActive = Boolean(sceneProject && sceneProjectEnabled)
 
@@ -132,7 +136,6 @@ function LoadedApp({
   }, [])
 
   useEffect(() => {
-    if (!showLeva) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target)) return
       if (event.code !== 'Backquote') return
@@ -142,7 +145,7 @@ function LoadedApp({
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [showLeva])
+  }, [])
 
   if (!editMatch && !match) {
     return <Redirect to={`/${worlds[0].slug}`} />
@@ -150,6 +153,7 @@ function LoadedApp({
 
   return (
     <div className="relative w-screen h-screen bg-black overflow-hidden select-none [&_*]:focus:outline-none [&_*]:focus-visible:outline-none [&_*]:focus:ring-0 [&_*]:focus-visible:ring-0">
+      <ViewerModeHotkeys />
       {!editing && LevaPanel && DebugPanel && showLeva && uiVisible && (
         <div className="hidden md:block">
           <Suspense fallback={null}>
@@ -180,32 +184,45 @@ function LoadedApp({
         onRefreshWorlds={onRefreshWorlds}
         refreshingWorlds={refreshingWorlds}
       />
+      {!editing && uiVisible && emptyWorld && (
+        <div className="pointer-events-none fixed inset-0 z-10 flex items-center justify-center px-6 gap-2">
+          <div className="bg-black/25 rounded px-2 py-1 flex items-center gap-2">
+            <TerminalWindowIcon size={18} weight="regular" className='animate-pulse' />
+            <span className="truncate text-center font-mono text-sm text-white/75">
+              waiting for objects and environment...
+            </span>
+          </div>
+        </div>
+      )}
+      {uiVisible && (
+        <div className={`fixed inset-x-4 top-4 sm:left-4 sm:right-auto ${editing ? 'z-30' : 'z-10'}`}>
+          <WorldSidebar
+            worlds={worlds}
+            activeSlug={entry.slug}
+            compact={editing}
+            activeSceneProject={sceneProject}
+            activeSceneProjectEnabled={sceneProjectActive}
+            onActiveSceneProjectToggle={() => setSceneProjectEnabled((enabled) => !enabled)}
+            activeWorldVersionIndex={activeWorldVersionIndex}
+            hoveredObjectAssetId={hoveredObjectAssetId}
+            hoveredObjectInstanceId={hoveredObjectInstanceId}
+            onObjectHover={handleObjectHover}
+            onWorldHover={handleWorldHover}
+            onActiveWorldVersionChange={(index) => setSelectedWorldVersions((versions) => ({
+              ...versions,
+              [entry.slug]: index,
+            }))}
+          />
+        </div>
+      )}
       {!editing && uiVisible && (
         <>
-          <div className="fixed inset-x-4 top-4 z-10 sm:left-4 sm:right-auto">
-            <WorldSidebar
-              worlds={worlds}
-              activeSlug={entry.slug}
-              activeSceneProject={sceneProject}
-              activeSceneProjectEnabled={sceneProjectActive}
-              onActiveSceneProjectToggle={() => setSceneProjectEnabled((enabled) => !enabled)}
-              activeWorldVersionIndex={activeWorldVersionIndex}
-              hoveredObjectAssetId={hoveredObjectAssetId}
-              hoveredObjectInstanceId={hoveredObjectInstanceId}
-              onObjectHover={handleObjectHover}
-              onWorldHover={handleWorldHover}
-              onActiveWorldVersionChange={(index) => setSelectedWorldVersions((versions) => ({
-                ...versions,
-                [entry.slug]: index,
-              }))}
-            />
-          </div>
           <TouchControls />
         </>
       )}
       {uiVisible && (
         <div className="fixed inset-x-0 bottom-4 z-20 flex justify-center px-4 sm:left-4 sm:right-auto sm:justify-start sm:px-0">
-          <BottomLeftControls editing={editing} />
+          <BottomLeftControls />
         </div>
       )}
     </div>

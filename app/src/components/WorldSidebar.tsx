@@ -1,15 +1,33 @@
 import { useState } from 'react'
 import { Tooltip } from '@radix-ui/themes'
-import { ButterflyIcon, CheckSquareIcon, FileTextIcon, FolderOpenIcon, GlobeHemisphereWestIcon, ListIcon, PencilSimpleIcon, QuestionMarkIcon, SquareIcon } from '@phosphor-icons/react'
+import { ArrowCounterClockwise, ButterflyIcon, CheckSquareIcon, FileTextIcon, FolderOpenIcon, GlobeHemisphereWestIcon, ImageSquareIcon, ListIcon, PencilSimpleIcon, PersonIcon, QuestionMarkIcon, SpeakerHigh, SpeakerSlash, SquareIcon, TerminalWindowIcon } from '@phosphor-icons/react'
 import { useLocation } from 'wouter'
 import type { WorldEntry, WorldHoverPreview, WorldObjectAsset, WorldSceneProject } from '../types/world'
-import { useDebugStore } from '../store/debug'
+import { type ControllerMode, useDebugStore } from '../store/debug'
+import { useAudioStore } from '../store/audio'
+import { ViewerQuality } from '../types/world'
 import { AppButton } from './AppButton'
 import { ChromeThumbnail, chrome } from './AppChrome'
+
+const CONTROLLER_MODES: readonly { mode: ControllerMode; label: string }[] = [
+  { mode: 'fly', label: 'Fly' },
+  { mode: 'fps', label: 'FPS' },
+]
+
+const QUALITY_MODES = [
+  { mode: ViewerQuality.Low, label: 'Low' },
+  { mode: ViewerQuality.High, label: 'High' },
+] as const
+
+function nextMode<T>(items: readonly { mode: T }[], current: T) {
+  const index = items.findIndex((item) => item.mode === current)
+  return items[(index + 1) % items.length].mode
+}
 
 interface Props {
   worlds: WorldEntry[]
   activeSlug: string
+  compact?: boolean
   activeSceneProject?: WorldSceneProject
   activeSceneProjectEnabled: boolean
   onActiveSceneProjectToggle: () => void
@@ -24,6 +42,7 @@ interface Props {
 export function WorldSidebar({
   worlds,
   activeSlug,
+  compact = false,
   activeSceneProject,
   activeSceneProjectEnabled,
   onActiveSceneProjectToggle,
@@ -45,6 +64,12 @@ export function WorldSidebar({
     setMenuOpen(false)
   }
 
+  const openClaudeTerminal = () => {
+    fetch('/__open-claude-terminal').catch((error) => {
+      console.warn('Could not open Claude terminal.', error)
+    })
+  }
+
   const openWorldFolder = (slug: string) => {
     fetch(`/__open-world-folder?slug=${encodeURIComponent(slug)}`).catch((error) => {
       console.warn(`Could not open world folder for "${slug}".`, error)
@@ -60,14 +85,16 @@ export function WorldSidebar({
   }
 
   return (
-    <aside className={`${chrome.enter} w-full sm:w-64 max-h-[80vh] flex flex-col gap-1 whitespace-nowrap text-sm`}>
+    <aside className={`${chrome.enter} ${compact ? 'w-64 max-w-[calc(100vw-2rem)]' : 'w-full sm:w-64 max-h-[80vh]'} flex flex-col gap-1 whitespace-nowrap text-sm`}>
       <div className={`${chrome.bar} flex flex-shrink-0 items-center justify-between px-2 py-1 text-sm font-medium font-mono`}>
         <AppButton
-          onClick={() => setMenuOpen((open) => !open)}
+          onClick={() => {
+            if (!compact) setMenuOpen((open) => !open)
+          }}
           className="min-w-0 flex-1 gap-2 px-1 truncate font-mono text-white opacity-100 hover:bg-transparent"
-          aria-expanded={menuOpen}
+          aria-expanded={compact ? undefined : menuOpen}
         >
-          <ListIcon size={16} weight="regular" className="text-white/60 sm:hidden" />
+          {!compact && <ListIcon size={16} weight="regular" className="text-white/60 sm:hidden" />}
           <span>image-blaster</span>{activeSlug && <span className="text-white/40 sm:hidden md:hidden">/ {activeSlug}</span>}
         </AppButton>
         <AppButton
@@ -89,9 +116,27 @@ export function WorldSidebar({
         >
           <span className="text-sm leading-none"><QuestionMarkIcon size={16} weight="regular" /></span>
         </a>
+        {canOpenLocalFolders && (
+          <Tooltip
+            content="Open new Claude terminal"
+            delayDuration={0}
+            side="right"
+          >
+            <AppButton
+              onClick={openClaudeTerminal}
+              className="h-7 w-7 justify-center p-1 text-white"
+              aria-label="Open new Claude terminal"
+              title="Open Claude terminal"
+            >
+              <TerminalWindowIcon size={16} weight="regular" />
+            </AppButton>
+          </Tooltip>
+        )}
       </div>
 
-      <div
+      <SidebarViewerControls />
+
+      {!compact && <div
         className={`
           ${chrome.panel} min-h-0 flex flex-1 flex-col gap-1 overflow-hidden p-1.5
           transition-[opacity,transform,max-height] duration-200 ease-out sm:max-h-[calc(90vh-3rem)] sm:translate-y-0 sm:opacity-100
@@ -99,7 +144,7 @@ export function WorldSidebar({
         `}
       >
         <div className="w-full min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
-          <div className="flex min-w-0 flex-col gap-1 pr-1">
+          <div className="flex min-w-0 flex-col gap-0 pr-1">
             {worlds.map(({ slug, project, world, worldVersions, objectAssets, sceneProject, sourceImageUrl }) => {
               const isActive = slug === activeSlug
               const name = project.display_name || slug
@@ -139,30 +184,24 @@ export function WorldSidebar({
                       onClick={() => selectWorld(slug)}
                       active={isActive}
                       className={`
-                        min-w-0 flex flex-1 items-center gap-2 rounded px-2 py-1.5 text-left
+                        min-w-0 flex flex-1 items-center rounded py-2 text-left
                         ${isActive ? 'hover:bg-transparent' : ''}
                       `}
                     >
                       <span className="block min-w-0 flex-1 truncate text-sm font-medium leading-tight text-white">{slug}</span>
                     </AppButton>
                     {isActive && (
-                      <Tooltip
-                        content={`Create or edit scene.json for ${name}`}
-                        delayDuration={0}
-                        side="right"
+                      <AppButton
+                        onClick={() => {
+                          navigate(`/${slug}/edit`)
+                          setMenuOpen(false)
+                        }}
+                        className="h-8 w-8 flex-shrink-0 justify-center text-white"
+                        aria-label={`Create or edit scene.json for ${name}`}
+                        title={`Create or edit scene.json for ${name}`}
                       >
-                        <AppButton
-                          onClick={() => {
-                            navigate(`/${slug}/edit`)
-                            setMenuOpen(false)
-                          }}
-                          className="h-8 w-8 flex-shrink-0 justify-center text-white"
-                          aria-label={`Create or edit scene.json for ${name}`}
-                          title={`Create or edit scene.json for ${name}`}
-                        >
-                          <PencilSimpleIcon size={15} weight="regular" />
-                        </AppButton>
-                      </Tooltip>
+                        <PencilSimpleIcon size={15} weight="regular" />
+                      </AppButton>
                     )}
                     {canOpenLocalFolders && isActive && (
                       <Tooltip
@@ -341,8 +380,67 @@ export function WorldSidebar({
             })}
           </div>
         </div>
-      </div>
+      </div>}
     </aside>
+  )
+}
+
+function SidebarViewerControls() {
+  const muted = useAudioStore((s) => s.muted)
+  const toggleMuted = useAudioStore((s) => s.toggleMuted)
+  const resetObjects = useDebugStore((s) => s.resetObjects)
+  const controllerMode = useDebugStore((s) => s.controllerMode)
+  const setControllerMode = useDebugStore((s) => s.setControllerMode)
+  const viewerQuality = useDebugStore((s) => s.viewerQuality)
+  const setViewerQuality = useDebugStore((s) => s.setViewerQuality)
+  const currentControllerMode = CONTROLLER_MODES.find((item) => item.mode === controllerMode) ?? CONTROLLER_MODES[0]
+  const currentQuality = QUALITY_MODES.find((item) => item.mode === viewerQuality) ?? QUALITY_MODES[0]
+
+  return (
+    <div className={`${chrome.bar} flex flex-shrink-0 items-center gap-1 text-sm font-medium font-mono`}>
+      <Tooltip content="Reset" delayDuration={0} side="right">
+        <AppButton
+          onClick={resetObjects}
+          className="h-7 w-7 justify-center p-1 text-white"
+          aria-label="Reset"
+          title="Reset"
+        >
+          <ArrowCounterClockwise size={16} weight="bold" />
+        </AppButton>
+      </Tooltip>
+      <Tooltip content={muted ? 'Unmute' : 'Mute'} delayDuration={0} side="right">
+        <AppButton
+          onClick={toggleMuted}
+          className="h-7 w-7 justify-center p-1 text-white"
+          aria-label={muted ? 'Unmute' : 'Mute'}
+          title={muted ? 'Unmute' : 'Mute'}
+        >
+          {muted ? <SpeakerSlash size={16} weight="fill" /> : <SpeakerHigh size={16} weight="fill" />}
+        </AppButton>
+      </Tooltip>
+      <Tooltip content="Change controller" delayDuration={0} side="right">
+        <AppButton
+          onClick={() => setControllerMode(nextMode(CONTROLLER_MODES, controllerMode))}
+          className="h-7 w-20 justify-center gap-1 flex border flex-1 border-white/20 text-white"
+          aria-label="Change controller"
+          title="Change controller"
+        >
+          <PersonIcon size={15} weight="fill" className="flex-shrink-0 text-white/45" />
+          <span>{currentControllerMode.label}</span>
+        </AppButton>
+      </Tooltip>
+      <Tooltip content="Change quality" delayDuration={0} side="right">
+        <AppButton
+          onClick={() => setViewerQuality(nextMode(QUALITY_MODES, viewerQuality))}
+          className="h-7 w-16 justify-center gap-1 flex border flex-1 border-white/20 text-white"
+          aria-label="Change quality"
+          title="Change quality"
+        >
+          <ImageSquareIcon size={15} weight="fill" className="flex-shrink-0 text-white/45" />
+          <span>{currentQuality.label}</span>
+        </AppButton>
+      </Tooltip>
+    </div>
   )
 }
 

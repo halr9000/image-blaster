@@ -12,11 +12,12 @@ const OBJECT_AUTO_ROTATE_Y_SPEED = 0.35
 
 const COLLIDER_WIREFRAME_COLOR = 0x00aaff
 
-type PointerHandler = (event: ThreeEvent<PointerEvent>) => void
-type HoverHandler = (objectId: string, hovering: boolean) => void
+type PointerHandler = (event: ThreeEvent<PointerEvent>) => boolean
+type HoverHandler = (event: ThreeEvent<PointerEvent>, objectId: string, hovering: boolean) => void
 type ClickHandler = (worldPos: THREE.Vector3) => void
 
 const _rotation = new THREE.Quaternion()
+export const SCENE_OBJECT_INSTANCE_ID_KEY = 'sceneObjectInstanceId'
 
 export interface SceneObjectHandle {
   id: string
@@ -25,6 +26,7 @@ export interface SceneObjectHandle {
   initialRotation: THREE.Quaternion
   bounds: THREE.Box3
   getFocusPoint: (target: THREE.Vector3) => THREE.Vector3
+  playInteractionSfx: () => void
 }
 
 interface Props {
@@ -35,7 +37,6 @@ interface Props {
   physics?: WorldObjectPhysics
   renderMode: ObjectRenderMode
   autoRotateY?: boolean
-  isHovered: boolean
   onHover: HoverHandler
   onClick?: ClickHandler
   onPointerDown?: PointerHandler
@@ -85,7 +86,6 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
     physics = 'rigidbody',
     renderMode,
     autoRotateY = false,
-    isHovered,
     onHover,
     onClick,
     onPointerDown,
@@ -101,18 +101,21 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
   const sfxRefs = useRef<Array<THREE.PositionalAudio | null>>([])
   const lastSfxIndexRef = useRef<number | null>(null)
   const muted = useAudioStore((s) => s.muted)
-  const isStatic = physics === 'static'
+  const isStatic = physics === 'static' || physics === 'ghost'
+  const usesBoxCollider = physics === 'rigidbody' || physics === 'static'
   const initialPosition = useMemo(() => new THREE.Vector3(...position), [position])
   const initialRotation = useMemo(() => new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotation)), [rotation])
   const { scene, wireframeOverlayScene, offset, size, bounds } = useSceneObjectVisual({
     asset: object,
     renderMode,
-    emphasized: isHovered,
   })
   const colliderCenter = useMemo(
     () => new THREE.Vector3(0, (size.y * OBJECT_SCALE) / 2, 0),
     [size],
   )
+  const colliderUserData = useMemo(() => ({
+    [SCENE_OBJECT_INSTANCE_ID_KEY]: object.id,
+  }), [object.id])
   const colliderHalfExtents = useMemo(
     () => new THREE.Vector3(
       Math.max((size.x * OBJECT_SCALE) / 2, 0.01),
@@ -137,13 +140,12 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
   })
 
   useEffect(() => {
-    const hiddenHitbox = renderMode === ObjectRenderMode.Lit
-    colliderWireframeMaterial.opacity = hiddenHitbox ? 0 : 1
+    colliderWireframeMaterial.opacity = 0
     colliderWireframeMaterial.transparent = true
     colliderWireframeMaterial.depthTest = false
     colliderWireframeMaterial.depthWrite = false
     colliderWireframeMaterial.needsUpdate = true
-  }, [colliderWireframeMaterial, renderMode])
+  }, [colliderWireframeMaterial])
 
   useEffect(() => {
     sfxRefs.current.length = object.sfxUrls.length
@@ -214,8 +216,30 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
         if (colliderProxyRef.current) return colliderProxyRef.current.getWorldPosition(target)
         return target.copy(initialPosition).add(colliderCenter)
       },
+      playInteractionSfx: playRandomSfx,
     }),
-    [bounds, colliderCenter, initialPosition, initialRotation, object.id],
+    [bounds, colliderCenter, initialPosition, initialRotation, object.id, playRandomSfx],
+  )
+
+  const visualContent = (
+    <group ref={visualGroupRef} scale={[OBJECT_SCALE * scale[0], OBJECT_SCALE * scale[1], OBJECT_SCALE * scale[2]]}>
+      <primitive object={scene} position={offset} dispose={null} />
+      {renderMode === ObjectRenderMode.ShadedWireframe && (
+        <primitive object={wireframeOverlayScene} position={offset} dispose={null} />
+      )}
+      {object.sfxUrls.map((url, index) => (
+        <SfxLoadErrorBoundary key={url} url={url}>
+          <PositionalAudio
+            ref={(audio) => {
+              sfxRefs.current[index] = audio
+            }}
+            url={url}
+            distance={2}
+            loop={false}
+          />
+        </SfxLoadErrorBoundary>
+      ))}
+    </group>
   )
 
   return (
@@ -231,26 +255,29 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
       ccd
       canSleep
     >
-      <CuboidCollider
-        args={[
-          colliderHalfExtents.x * scale[0],
-          colliderHalfExtents.y * scale[1],
-          colliderHalfExtents.z * scale[2],
-        ]}
-        position={[colliderCenter.x * scale[0], colliderCenter.y * scale[1], colliderCenter.z * scale[2]]}
-      />
+      {usesBoxCollider && (
+        <CuboidCollider
+          args={[
+            colliderHalfExtents.x * scale[0],
+            colliderHalfExtents.y * scale[1],
+            colliderHalfExtents.z * scale[2],
+          ]}
+          position={[colliderCenter.x * scale[0], colliderCenter.y * scale[1], colliderCenter.z * scale[2]]}
+        />
+      )}
       <mesh
         ref={colliderProxyRef}
         position={[colliderCenter.x * scale[0], colliderCenter.y * scale[1], colliderCenter.z * scale[2]]}
         material={colliderWireframeMaterial}
         renderOrder={10000}
+        userData={colliderUserData}
         onPointerOver={(event) => {
           event.stopPropagation()
-          onHover(object.id, true)
+          onHover(event, object.id, true)
         }}
         onPointerOut={(event) => {
           event.stopPropagation()
-          onHover(object.id, false)
+          onHover(event, object.id, false)
         }}
         onClick={(event) => {
           event.stopPropagation()
@@ -259,10 +286,12 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
         onPointerDown={(event) => {
           if (event.button !== 0) return
           event.stopPropagation()
-          playRandomSfx()
-          if (!isStatic) onPointerDown?.(event)
+          if (!onPointerDown?.(event)) playRandomSfx()
         }}
-        onPointerMove={onPointerMove}
+        onPointerMove={(event) => {
+          onHover(event, object.id, true)
+          onPointerMove?.(event)
+        }}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
       >
@@ -272,24 +301,7 @@ export const SceneObject = forwardRef<SceneObjectHandle, Props>(function SceneOb
           colliderHalfExtents.z * scale[2] * 2,
         ]} />
       </mesh>
-      <group ref={visualGroupRef} scale={[OBJECT_SCALE * scale[0], OBJECT_SCALE * scale[1], OBJECT_SCALE * scale[2]]}>
-        <primitive object={scene} position={offset} dispose={null} />
-        {renderMode === ObjectRenderMode.ShadedWireframe && (
-          <primitive object={wireframeOverlayScene} position={offset} dispose={null} />
-        )}
-        {object.sfxUrls.map((url, index) => (
-          <SfxLoadErrorBoundary key={url} url={url}>
-            <PositionalAudio
-              ref={(audio) => {
-                sfxRefs.current[index] = audio
-              }}
-              url={url}
-              distance={2}
-              loop={false}
-            />
-          </SfxLoadErrorBoundary>
-        ))}
-      </group>
+      {visualContent}
     </RigidBody>
   )
 })

@@ -1,19 +1,14 @@
 import {
-  ArrowCounterClockwise,
   GlobeSimple,
   Sphere,
-  SpeakerHigh,
-  SpeakerSlash,
   GlobeHemisphereEast,
-  CameraIcon,
   ParkIcon,
   MountainsIcon,
   CubeIcon,
 } from '@phosphor-icons/react'
 import { Tooltip } from '@radix-ui/themes'
 import { type ReactElement, useEffect } from 'react'
-import { useAudioStore } from '../store/audio'
-import { type ControllerMode, useDebugStore } from '../store/debug'
+import { useDebugStore } from '../store/debug'
 import { ObjectRenderMode, ViewerQuality, WorldRenderMode } from '../types/world'
 import { isEditableTarget } from '../utils/dom'
 import { AppButton } from './AppButton'
@@ -25,21 +20,11 @@ const OBJECT_MODES = [
   { mode: ObjectRenderMode.Wireframe, Icon: GlobeSimple, label: 'Wireframe' },
 ] as const
 
-const QUALITY_MODES = [
-  { mode: ViewerQuality.Low, label: 'Low' },
-  { mode: ViewerQuality.High, label: 'High' },
-] as const
-
 const WORLD_MODES = [
   { mode: WorldRenderMode.Combined, Icon: ParkIcon, label: 'Scene + Objects' },
   { mode: WorldRenderMode.SplatOnly, Icon: MountainsIcon, label: 'Scene' },
   { mode: WorldRenderMode.ObjectOnly, Icon: CubeIcon, label: 'Objects' },
 ] as const
-
-const CONTROLLER_MODES: readonly { mode: ControllerMode; label: string }[] = [
-  { mode: 'fly', label: 'Fly' },
-  { mode: 'fps', label: 'FPS' },
-]
 
 const DIGIT_KEY_INDEX: Record<string, number> = {
   Digit1: 0,
@@ -47,10 +32,9 @@ const DIGIT_KEY_INDEX: Record<string, number> = {
   Digit3: 2,
 }
 
-function nextMode<T>(items: readonly { mode: T }[], current: T) {
-  const index = items.findIndex((item) => item.mode === current)
-  return items[(index + 1) % items.length].mode
-}
+const QUALITY_MODE_KEYS = [ViewerQuality.Low, ViewerQuality.High] as const
+const OBJECT_MODE_KEYS = [ObjectRenderMode.Lit, ObjectRenderMode.ShadedWireframe, ObjectRenderMode.Wireframe] as const
+const WORLD_MODE_KEYS = [WorldRenderMode.Combined, WorldRenderMode.SplatOnly, WorldRenderMode.ObjectOnly] as const
 
 function ControlTooltip({ content, children }: { content: string; children: ReactElement }) {
   return (
@@ -60,18 +44,10 @@ function ControlTooltip({ content, children }: { content: string; children: Reac
   )
 }
 
-export function BottomLeftControls({ editing = false }: { editing?: boolean }) {
-  const muted = useAudioStore((s) => s.muted)
-  const toggleMuted = useAudioStore((s) => s.toggleMuted)
-  const resetObjects = useDebugStore((s) => s.resetObjects)
-  const viewerQuality = useDebugStore((s) => s.viewerQuality)
+export function ViewerModeHotkeys() {
   const setViewerQuality = useDebugStore((s) => s.setViewerQuality)
-  const objectRenderMode = useDebugStore((s) => s.objectRenderMode)
   const setObjectRenderMode = useDebugStore((s) => s.setObjectRenderMode)
-  const worldRenderMode = useDebugStore((s) => s.worldRenderMode)
   const setWorldRenderMode = useDebugStore((s) => s.setWorldRenderMode)
-  const controllerMode = useDebugStore((s) => s.controllerMode)
-  const setControllerMode = useDebugStore((s) => s.setControllerMode)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -79,75 +55,40 @@ export function BottomLeftControls({ editing = false }: { editing?: boolean }) {
       const n = DIGIT_KEY_INDEX[e.code]
       if (n === undefined) return
       if (e.altKey && e.shiftKey) {
-        const qualities = [ViewerQuality.Low, ViewerQuality.High]
-        const quality = qualities[n]
+        const quality = QUALITY_MODE_KEYS[n]
         if (quality) {
           e.preventDefault()
           setViewerQuality(quality)
         }
       } else if (e.altKey) {
-        const objects = [ObjectRenderMode.Lit, ObjectRenderMode.ShadedWireframe, ObjectRenderMode.Wireframe]
         e.preventDefault()
-        setObjectRenderMode(objects[n])
+        setObjectRenderMode(OBJECT_MODE_KEYS[n])
       } else if (e.shiftKey) {
-        const worlds = [WorldRenderMode.Combined, WorldRenderMode.SplatOnly, WorldRenderMode.ObjectOnly]
         e.preventDefault()
-        setWorldRenderMode(worlds[n])
+        setWorldRenderMode(WORLD_MODE_KEYS[n])
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [setObjectRenderMode, setViewerQuality, setWorldRenderMode])
 
-  const utilBtn =
-    'w-8 h-8 justify-center text-white rounded'
-  const disabledBtn =
-    'disabled:pointer-events-none disabled:opacity-30'
+  return null
+}
+
+export function BottomLeftControls() {
+  const objectRenderMode = useDebugStore((s) => s.objectRenderMode)
+  const setObjectRenderMode = useDebugStore((s) => s.setObjectRenderMode)
+  const worldRenderMode = useDebugStore((s) => s.worldRenderMode)
+  const setWorldRenderMode = useDebugStore((s) => s.setWorldRenderMode)
 
   const modeBtn = (active: boolean) =>
     `w-8 h-8 justify-center rounded ${
       active ? 'bg-white/15 text-white' : 'text-white'
     }`
 
-  const currentQuality = QUALITY_MODES.find((item) => item.mode === viewerQuality) ?? QUALITY_MODES[0]
-  const currentControllerMode = CONTROLLER_MODES.find((item) => item.mode === controllerMode) ?? CONTROLLER_MODES[0]
-
   return (
-    <div className={`${chrome.enter} ${chrome.bar} flex h-10 w-full items-center justify-center gap-1 px-2 sm:w-auto`}>
-      {/* utility */}
-      <ControlTooltip content={editing ? 'Reset unavailable while editing' : 'Reset'}>
-        <AppButton
-          onClick={resetObjects}
-          className={`${utilBtn} ${disabledBtn}`}
-          disabled={editing}
-        >
-          <ArrowCounterClockwise size={18} weight="bold" />
-        </AppButton>
-      </ControlTooltip>
-      <ControlTooltip content={muted ? 'Unmute' : 'Mute'}>
-        <AppButton onClick={toggleMuted} className={utilBtn}>
-          {muted ? <SpeakerSlash size={18} weight="fill" /> : <SpeakerHigh size={18} weight="fill" />}
-        </AppButton>
-      </ControlTooltip>
-
-      <div className={`${chrome.divider} mx-1`} />
-
-      {/* controller mode */}
-      <ControlTooltip content={editing ? 'Controller unavailable while editing' : 'Change controller'}>
-        <AppButton
-          onClick={() => setControllerMode(nextMode(CONTROLLER_MODES, controllerMode))}
-          className={`w-24 ${disabledBtn}`}
-          disabled={editing}
-        >
-          <CameraIcon size={15} weight="regular" className="text-white/45 flex-shrink-0" />
-          <span>{currentControllerMode.label}</span>
-        </AppButton>
-      </ControlTooltip>
-
-      <div className={`${chrome.divider} mx-1`} />
-
-      {/* world render mode */}
-      <div className="flex items-center gap-1">
+    <div className={`${chrome.enter} flex w-full items-center justify-center gap-2 sm:w-auto`}>
+      <div className={`${chrome.bar} flex h-10 items-center gap-1`}>
         {WORLD_MODES.map(({ mode, Icon, label }) => (
           <ControlTooltip key={mode} content={label}>
             <AppButton
@@ -161,10 +102,7 @@ export function BottomLeftControls({ editing = false }: { editing?: boolean }) {
         ))}
       </div>
 
-      <div className={`${chrome.divider} mx-1`} />
-
-      {/* object render mode */}
-      <div className="flex items-center gap-1">
+      <div className={`${chrome.bar} flex h-10 items-center gap-1`}>
         {OBJECT_MODES.map(({ mode, Icon, label }) => (
           <ControlTooltip key={mode} content={label}>
             <AppButton
@@ -177,19 +115,6 @@ export function BottomLeftControls({ editing = false }: { editing?: boolean }) {
           </ControlTooltip>
         ))}
       </div>
-
-      <div className={`${chrome.divider} mx-1`} />
-
-      {/* viewer quality */}
-      <ControlTooltip content="Change quality">
-        <AppButton
-          onClick={() => setViewerQuality(nextMode(QUALITY_MODES, viewerQuality))}
-          className={'w-20'}
-        >
-          <CameraIcon size={15} weight="regular" className="text-white/45 flex-shrink-0" />
-          <span>{currentQuality.label}</span>
-        </AppButton>
-      </ControlTooltip>
     </div>
   )
 }

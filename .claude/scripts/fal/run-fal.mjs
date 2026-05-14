@@ -143,7 +143,7 @@ async function callFalRun(endpoint, input, options) {
       completed_at: new Date().toISOString(),
       error: sanitizeForMetadata(body)
     });
-    throw new Error(`FAL run failed (${response.status}): ${JSON.stringify(body)}`);
+    throw new Error(`FAL run failed (${response.status}).`);
   }
 
   return {

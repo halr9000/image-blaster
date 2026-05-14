@@ -4,18 +4,16 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { ObjectRenderMode, type WorldObjectAsset } from '../../types/world'
-import { HOVER_DIM_FACTOR, SHADED_COLOR, useAssetMaterials } from './useAssetMaterials'
+import { SHADED_COLOR, useAssetMaterials } from './useAssetMaterials'
 
 interface MeshMaterialState {
   mesh: THREE.Mesh
   litMaterials: THREE.Material | THREE.Material[]
-  colorEntries: Array<{ material: THREE.Material & { color: THREE.Color }; baseColor: THREE.Color }>
 }
 
 interface SceneObjectVisualArgs {
   asset: WorldObjectAsset
   renderMode: ObjectRenderMode
-  emphasized?: boolean
 }
 
 const ignoreRaycast: THREE.Object3D['raycast'] = () => {}
@@ -29,11 +27,7 @@ function asMaterialArray(material: THREE.Material | THREE.Material[]) {
   return Array.isArray(material) ? material : [material]
 }
 
-function hasColor(material: THREE.Material): material is THREE.Material & { color: THREE.Color } {
-  return 'color' in material && material.color instanceof THREE.Color
-}
-
-export function useSceneObjectVisual({ asset, renderMode, emphasized = false }: SceneObjectVisualArgs) {
+export function useSceneObjectVisual({ asset, renderMode }: SceneObjectVisualArgs) {
   const gltf = useLoader(GLTFLoader, asset.url)
   const { wireframeMaterial, shadedMaterial, wireframeOverlayMaterial } = useAssetMaterials()
 
@@ -45,19 +39,12 @@ export function useSceneObjectVisual({ asset, renderMode, emphasized = false }: 
     clonedScene.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return
       child.castShadow = true
-      child.receiveShadow = false
+      child.receiveShadow = true
       child.raycast = ignoreRaycast
 
       const litMaterials = cloneMaterial(child.material)
       child.material = litMaterials
-      const colorEntries = asMaterialArray(litMaterials)
-        .filter(hasColor)
-        .map((material) => ({
-          material,
-          baseColor: material.color.clone(),
-        }))
-
-      states.push({ mesh: child, litMaterials, colorEntries })
+      states.push({ mesh: child, litMaterials })
     })
 
     const box = new THREE.Box3().setFromObject(clonedScene)
@@ -93,7 +80,6 @@ export function useSceneObjectVisual({ asset, renderMode, emphasized = false }: 
   useEffect(() => {
     if (renderMode === ObjectRenderMode.ShadedWireframe) {
       shadedMaterial.color.copy(SHADED_COLOR)
-      if (emphasized) shadedMaterial.color.multiplyScalar(HOVER_DIM_FACTOR)
     }
 
     for (const state of materialStates) {
@@ -108,12 +94,8 @@ export function useSceneObjectVisual({ asset, renderMode, emphasized = false }: 
       }
 
       state.mesh.material = state.litMaterials
-      for (const { material, baseColor } of state.colorEntries) {
-        material.color.copy(baseColor)
-        if (emphasized) material.color.multiplyScalar(HOVER_DIM_FACTOR)
-      }
     }
-  }, [emphasized, materialStates, renderMode, shadedMaterial, wireframeMaterial])
+  }, [materialStates, renderMode, shadedMaterial, wireframeMaterial])
 
   useEffect(() => {
     return () => {

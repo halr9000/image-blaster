@@ -2,7 +2,7 @@
 name: image-blast-uncover
 description: Main image analysis skill, object generation, plate decisionmaking, and initial scene description. Use this skill when user wants to create objects and necessary for main image analysis.  
 argument-hint: [world-name] [optional image paths or instructions]
-allowed-tools: Read Write Glob Bash(ls *) Bash(node .claude/scripts/project/project-state.mjs *) Bash(node .claude/scripts/project/show-folder.mjs *)
+allowed-tools: Read Write Glob Bash(ls *) Bash(node .claude/scripts/project/project-state.mjs *)
 ---
 
 Uncover literal image information for project `$0`. Additional image paths or instructions may appear in `$ARGUMENTS`.
@@ -18,11 +18,7 @@ Follow the generic file convention in `.claude/rules/project.md`. Use `ls -a` to
 node .claude/scripts/project/project-state.mjs --world "$0" --stage-input
 ```
 
-If no source images exist after staging and the user needs to add images, open the staging folder before asking them to drop files there:
-
-```bash
-node .claude/scripts/project/show-folder.mjs input
-```
+If no source images exist after staging and the user needs to add images, report the `input/` path and ask them to add files there.
 
 3. Read `IMAGE-BLAST.md` in this skill directory and follow its JSON contract exactly.
 4. Gather source images from explicit paths in `$ARGUMENTS` and `worlds/$0/source/`. Use `input/` only through the project-state staging step so source paths are stable. Source images use indexed families (`0-<slug>.<ext>`, `1-<slug>.png`, etc.); by default, analyze the latest image in each family and do not treat every historical plate/edit as separate evidence unless requested.

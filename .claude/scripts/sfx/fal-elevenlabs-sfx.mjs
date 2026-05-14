@@ -352,7 +352,7 @@ export async function generateSfx(options) {
         });
     const audioUrl = result.data?.audio?.url;
     if (!audioUrl) {
-      throw new Error(`FAL SFX result did not include audio.url: ${JSON.stringify(result.data)}`);
+      throw new Error("FAL SFX result did not include audio.url.");
     }
 
     const audioPath = artifactPath(outputDir, requestIndex, audioPrefix, extension);

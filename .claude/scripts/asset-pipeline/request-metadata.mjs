@@ -1,6 +1,6 @@
 import { readdir } from "node:fs/promises";
 import path from "node:path";
-import { ensureDir, readJson, safeFileName, sanitizeForMetadata } from "./fal-queue.mjs";
+import { ensureDir, readJson, safeFileName, stripBase64 } from "./fal-queue.mjs";
 
 export function parseIndexedName(value) {
   const fileName = path.basename(value || "");
@@ -126,7 +126,7 @@ export function buildRequestSummary(options) {
     extra = {}
   } = options;
 
-  return {
+  return stripBase64({
     schema_version: 1,
     kind,
     ...metadata,
@@ -139,9 +139,9 @@ export function buildRequestSummary(options) {
     ...(prompt !== undefined ? { prompt } : {}),
     input_files: inputFiles,
     output_files: outputFiles,
-    downloaded_files: sanitizeForMetadata(downloadedFiles),
-    result: sanitizeForMetadata(result),
+    downloaded_files: downloadedFiles,
+    result,
     error,
     ...extra
-  };
+  });
 }

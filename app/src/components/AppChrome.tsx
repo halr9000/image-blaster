@@ -42,7 +42,6 @@ export function ChromeThumbnail({
   return (
     <span className="relative h-7 w-7 flex-shrink-0 overflow-hidden rounded bg-white/10 ring-1 ring-white/10">
       <img src={thumbnailUrl} alt={alt} className="h-full w-full object-cover" />
-      <span className="absolute inset-0 bg-black/10" />
     </span>
   )
 }

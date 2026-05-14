@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type SetStateAction } from 'react'
 import { TransformControls } from '@react-three/drei'
 import { ThreeEvent, useThree } from '@react-three/fiber'
 import { useLocation } from 'wouter'
@@ -26,7 +26,15 @@ import { OBJECT_SCALE } from './SceneObject'
 import { getInitialPlacements } from './placements'
 import { DROP_TARGET_LAYER } from './dropTargets'
 import { useSceneObjectVisual } from './useSceneObjectVisual'
+import { ObjectHoverGuides } from './ObjectHoverGuides'
 import { isEditableTarget } from '../../utils/dom'
+import {
+  DEFAULT_SHADOW_CATCHER_COLOR,
+  DEFAULT_SHADOW_CATCHER_OPACITY,
+  shadowCatcherColor as normalizeShadowCatcherColor,
+  shadowCatcherOpacity as normalizeShadowCatcherOpacity,
+} from './shadows'
+import { twMerge } from 'tailwind-merge'
 
 export type TransformMode = 'translate' | 'rotate' | 'scale'
 type TransformField = 'position' | 'rotation' | 'scale'
@@ -54,6 +62,8 @@ interface EditableObjectProps {
   externallyHovered?: boolean
   renderMode: ObjectRenderMode
   onSelect: (event: ThreeEvent<MouseEvent>, instanceId: string) => void
+  onHover: (event: ThreeEvent<PointerEvent>, instanceId: string) => void
+  onHoverEnd: (event: ThreeEvent<PointerEvent>, instanceId: string) => void
   setRef?: (group: THREE.Group | null) => void
 }
 
@@ -109,6 +119,14 @@ export interface PlacementEditorController {
   groundPlaneOffset: number
   resetGroundPlaneOffset: () => void
   updateGroundPlaneOffset: (groundPlaneOffset: number) => void
+  groundPlaneColliderEnabled: boolean
+  updateGroundPlaneColliderEnabled: (enabled: boolean) => void
+  shadowCatcherOpacity: number
+  resetShadowCatcherOpacity: () => void
+  updateShadowCatcherOpacity: (shadowCatcherOpacity: number) => void
+  shadowCatcherColor: string
+  resetShadowCatcherColor: () => void
+  updateShadowCatcherColor: (shadowCatcherColor: string) => void
   undo: () => void
   redo: () => void
   resetEdits: () => void
@@ -117,10 +135,23 @@ export interface PlacementEditorController {
   setFlushSelectedTransformHandler: (handler: (() => WorldObjectPlacement[] | null) | null) => void
 }
 
+interface EditorBaseline {
+  slug: string
+  instances: WorldObjectPlacement[]
+  sun: WorldSceneSun
+  metricScaleFactor: number
+  groundPlaneOffset: number
+  groundPlaneColliderEnabled: boolean
+  shadowCatcherOpacity: number
+  shadowCatcherColor: string
+  signature: string
+}
+
 const HISTORY_LIMIT = 80
 const PASTE_OFFSET: [number, number, number] = [0.25, 0, 0.25]
 const ROTATION_SNAP_DEGREES = 5
 const VALUE_EPSILON = 0.0005
+const EDITABLE_OBJECT_INSTANCE_ID_KEY = 'editableObjectInstanceId'
 const projectVersion = 1
 const DEFAULT_SCENE_SUN: WorldSceneSun = { intensity: 1, rotation: [0, 0, 0], environmentIntensity: 2 }
 const TRANSFORM_FIELDS: Array<{ field: TransformField; label: string; step: number }> = [
@@ -133,6 +164,9 @@ const TRANSFORM_AXES: Array<{ axis: TransformAxis; label: string }> = [
   { axis: 1, label: 'Y' },
   { axis: 2, label: 'Z' },
 ]
+const SCRUB_PIXELS_PER_STEP = 8
+const _editableObjectCenter = new THREE.Vector3()
+const _projectedEditableObjectCenter = new THREE.Vector3()
 
 function clonePlacements(instances: WorldObjectPlacement[]): WorldObjectPlacement[] {
   return instances.map((instance) => ({
@@ -156,9 +190,93 @@ function signature(value: unknown) {
   return JSON.stringify(value)
 }
 
+function editorStateSignature(
+  instances: WorldObjectPlacement[],
+  sun: WorldSceneSun,
+  metricScaleFactor: number,
+  groundPlaneOffset: number,
+  groundPlaneColliderEnabled: boolean,
+  shadowCatcherOpacity: number,
+  shadowCatcherColor: string,
+) {
+  return signature({
+    instances,
+    sun,
+    metricScaleFactor,
+    groundPlaneOffset,
+    groundPlaneColliderEnabled,
+    shadowCatcherOpacity,
+    shadowCatcherColor,
+  })
+}
+
 function scaledGroundPlaneOffset(baseGroundPlaneOffset: number, metricScaleFactor: number, baseMetricScaleFactor: number) {
   const divisor = baseMetricScaleFactor || 1
   return baseGroundPlaneOffset * (metricScaleFactor / divisor)
+}
+
+function makeEditorBaseline({
+  slug,
+  objects,
+  sceneProject,
+  baseMetricScaleFactor,
+  baseGroundPlaneOffset,
+}: {
+  slug: string
+  objects: WorldObjectAsset[]
+  sceneProject?: WorldSceneProject
+  baseMetricScaleFactor: number
+  baseGroundPlaneOffset: number
+}): EditorBaseline {
+  const metricScaleFactor = sceneProject?.metricScaleFactor ?? baseMetricScaleFactor
+  const groundPlaneOffset = sceneProject?.groundPlaneOffset ??
+    scaledGroundPlaneOffset(baseGroundPlaneOffset, metricScaleFactor, baseMetricScaleFactor)
+  const groundPlaneColliderEnabled = sceneProject?.groundPlaneColliderEnabled ?? false
+  const shadowCatcherOpacity = normalizeShadowCatcherOpacity(sceneProject?.shadowCatcherOpacity)
+  const shadowCatcherColor = normalizeShadowCatcherColor(sceneProject?.shadowCatcherColor)
+  const instances = clonePlacements(getInitialPlacements(objects, sceneProject?.instances))
+  const sun = cloneSun(sceneProject?.sun)
+
+  return {
+    slug,
+    instances,
+    sun,
+    metricScaleFactor,
+    groundPlaneOffset,
+    groundPlaneColliderEnabled,
+    shadowCatcherOpacity,
+    shadowCatcherColor,
+    signature: editorStateSignature(
+      instances,
+      sun,
+      metricScaleFactor,
+      groundPlaneOffset,
+      groundPlaneColliderEnabled,
+      shadowCatcherOpacity,
+      shadowCatcherColor,
+    ),
+  }
+}
+
+function isDraftDirty(
+  baseline: EditorBaseline,
+  instances: WorldObjectPlacement[],
+  sun: WorldSceneSun,
+  metricScaleFactor: number,
+  groundPlaneOffset: number,
+  groundPlaneColliderEnabled: boolean,
+  shadowCatcherOpacity: number,
+  shadowCatcherColor: string,
+) {
+  return editorStateSignature(
+    instances,
+    sun,
+    metricScaleFactor,
+    groundPlaneOffset,
+    groundPlaneColliderEnabled,
+    shadowCatcherOpacity,
+    shadowCatcherColor,
+  ) !== baseline.signature
 }
 
 function asTuple(vector: THREE.Vector3): [number, number, number] {
@@ -189,6 +307,47 @@ function placementAssetKey(placement: WorldObjectPlacement) {
   return placement.assetId ?? placement.objectId
 }
 
+function editableObjectInstanceIdFromIntersectionObject(object: THREE.Object3D) {
+  let current: THREE.Object3D | null = object
+  while (current) {
+    const instanceId = current.userData[EDITABLE_OBJECT_INSTANCE_ID_KEY]
+    if (typeof instanceId === 'string') return instanceId
+    current = current.parent
+  }
+  return null
+}
+
+function nearestEditableObjectInstanceId(
+  event: ThreeEvent<MouseEvent | PointerEvent>,
+  fallbackInstanceId: string,
+  camera: THREE.Camera,
+) {
+  const seenInstanceIds = new Set<string>()
+  let best: { instanceId: string; centerDistanceSq: number; hitDistance: number } | null = null
+
+  for (const intersection of event.intersections) {
+    const instanceId = editableObjectInstanceIdFromIntersectionObject(intersection.object)
+    if (!instanceId || seenInstanceIds.has(instanceId)) continue
+    seenInstanceIds.add(instanceId)
+
+    intersection.object.getWorldPosition(_editableObjectCenter)
+    _projectedEditableObjectCenter.copy(_editableObjectCenter).project(camera)
+    const centerDistanceSq =
+      (_projectedEditableObjectCenter.x - event.pointer.x) ** 2 +
+      (_projectedEditableObjectCenter.y - event.pointer.y) ** 2
+    const hitDistance = Number.isFinite(intersection.distance) ? intersection.distance : Number.POSITIVE_INFINITY
+    if (
+      !best ||
+      centerDistanceSq < best.centerDistanceSq ||
+      (centerDistanceSq === best.centerDistanceSq && hitDistance < best.hitDistance)
+    ) {
+      best = { instanceId, centerDistanceSq, hitDistance }
+    }
+  }
+
+  return best?.instanceId ?? fallbackInstanceId
+}
+
 function EditableObject({
   asset,
   placement,
@@ -196,15 +355,26 @@ function EditableObject({
   externallyHovered = false,
   renderMode,
   onSelect,
+  onHover,
+  onHoverEnd,
   setRef,
 }: EditableObjectProps) {
-  const [hovered, setHovered] = useState(false)
-  const activeHovered = hovered || externallyHovered
+  const activeHovered = externallyHovered
   const { scene, wireframeOverlayScene, offset, size } = useSceneObjectVisual({
     asset,
     renderMode,
-    emphasized: activeHovered || selected,
   })
+  const hitboxUserData = useMemo(() => ({
+    [EDITABLE_OBJECT_INSTANCE_ID_KEY]: placement.instanceId,
+  }), [placement.instanceId])
+  const hoverGuideSize = useMemo(
+    () => new THREE.Vector3(
+      Math.max(size.x * OBJECT_SCALE, 0.01),
+      Math.max(size.y * OBJECT_SCALE, 0.01),
+      Math.max(size.z * OBJECT_SCALE, 0.01),
+    ),
+    [size],
+  )
 
   return (
     <group
@@ -219,15 +389,21 @@ function EditableObject({
           <primitive object={wireframeOverlayScene} position={offset} dispose={null} />
         )}
       </group>
+      {(activeHovered || selected) && <ObjectHoverGuides size={hoverGuideSize} />}
       <mesh
         position={[0, Math.max(size.y * OBJECT_SCALE, 0.01) / 2, 0]}
+        userData={hitboxUserData}
         onPointerOver={(event) => {
           event.stopPropagation()
-          setHovered(true)
+          onHover(event, placement.instanceId)
+        }}
+        onPointerMove={(event) => {
+          event.stopPropagation()
+          onHover(event, placement.instanceId)
         }}
         onPointerOut={(event) => {
           event.stopPropagation()
-          setHovered(false)
+          onHoverEnd(event, placement.instanceId)
         }}
         onClick={(event) => onSelect(event, placement.instanceId)}
       >
@@ -237,12 +413,12 @@ function EditableObject({
           Math.max(size.z * OBJECT_SCALE, 0.05),
         ]} />
         <meshBasicMaterial
-          color={selected ? 0x7dd3fc : 0xffffff}
+          color={0xffffff}
           wireframe
-          transparent={!selected && !activeHovered}
-          opacity={selected || activeHovered ? 1 : 0}
+          transparent
+          opacity={0}
           depthTest
-          depthWrite={selected || activeHovered}
+          depthWrite={false}
           toneMapped={false}
         />
       </mesh>
@@ -268,6 +444,82 @@ function snapTransformInputValue(field: TransformField, value: number) {
   return Math.round(value / ROTATION_SNAP_DEGREES) * ROTATION_SNAP_DEGREES
 }
 
+function parseDraftNumber(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed || trimmed === '-' || trimmed === '+' || trimmed === '.' || trimmed === '-.' || trimmed === '+.') return undefined
+  const parsed = Number(trimmed)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function useHorizontalNumberScrub({
+  value,
+  step,
+  onDraft,
+  onCommit,
+  format = formatTransformValue,
+}: {
+  value: number
+  step: number
+  onDraft: (value: string) => void
+  onCommit: (value: number) => void
+  format?: (value: number) => string
+}) {
+  const dragRef = useRef<{
+    pointerId: number
+    startX: number
+    startValue: number
+    moved: boolean
+  } | null>(null)
+
+  const onPointerDown = useCallback((event: ReactPointerEvent<HTMLInputElement>) => {
+    if (event.button !== 0) return
+    const parsed = parseDraftNumber(event.currentTarget.value)
+    event.currentTarget.style.cursor = 'ew-resize'
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startValue: parsed ?? value,
+      moved: false,
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }, [value])
+
+  const onPointerMove = useCallback((event: ReactPointerEvent<HTMLInputElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+
+    const deltaX = event.clientX - drag.startX
+    if (Math.abs(deltaX) < 2) return
+    drag.moved = true
+
+    const multiplier = event.shiftKey ? 10 : event.altKey ? 0.1 : 1
+    const next = drag.startValue + (deltaX / SCRUB_PIXELS_PER_STEP) * step * multiplier
+    onDraft(format(next))
+    onCommit(next)
+  }, [format, onCommit, onDraft, step])
+
+  const finish = useCallback((event: ReactPointerEvent<HTMLInputElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    event.currentTarget.style.cursor = ''
+    if (drag.moved) event.currentTarget.blur()
+    dragRef.current = null
+  }, [])
+
+  return {
+    isScrubbingRef: dragRef,
+    scrubHandlers: {
+      onPointerDown,
+      onPointerMove,
+      onPointerUp: finish,
+      onPointerCancel: finish,
+    },
+  }
+}
+
 function TransformValueInput({
   field,
   axis,
@@ -281,9 +533,16 @@ function TransformValueInput({
   value: number
   onChange: (field: TransformField, axis: TransformAxis, value: number) => void
 }) {
+  const displayNumber = field === 'rotation' ? THREE.MathUtils.radToDeg(value) : value
   const displayValue = transformInputValue(field, value)
   const [draft, setDraft] = useState(displayValue)
   const [focused, setFocused] = useState(false)
+  const { scrubHandlers } = useHorizontalNumberScrub({
+    value: displayNumber,
+    step,
+    onDraft: setDraft,
+    onCommit: (next) => onChange(field, axis, transformPlacementValue(field, next)),
+  })
 
   useEffect(() => {
     if (!focused) setDraft(displayValue)
@@ -291,20 +550,22 @@ function TransformValueInput({
 
   return (
     <input
-      type="number"
+      type="text"
+      inputMode="decimal"
       step={step}
       value={draft}
       onFocus={() => setFocused(true)}
+      {...scrubHandlers}
       onChange={(event) => {
         const next = event.currentTarget.value
         setDraft(next)
-        const parsed = Number.parseFloat(next)
-        if (Number.isFinite(parsed)) onChange(field, axis, transformPlacementValue(field, parsed))
+        const parsed = parseDraftNumber(next)
+        if (parsed !== undefined) onChange(field, axis, transformPlacementValue(field, parsed))
       }}
       onBlur={() => {
         setFocused(false)
-        const parsed = Number.parseFloat(draft)
-        if (!Number.isFinite(parsed)) {
+        const parsed = parseDraftNumber(draft)
+        if (parsed === undefined) {
           setDraft(displayValue)
           return
         }
@@ -312,7 +573,12 @@ function TransformValueInput({
         setDraft(formatTransformValue(snapped))
         onChange(field, axis, transformPlacementValue(field, snapped))
       }}
-      className="h-7 w-full rounded border border-white/10 bg-black/40 px-1.5 text-right text-xs text-white/85"
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter') return
+        event.preventDefault()
+        event.currentTarget.blur()
+      }}
+      className="h-7 w-full cursor-ew-resize rounded border border-white/10 bg-black/40 px-1.5 text-right text-xs text-white/85"
     />
   )
 }
@@ -335,37 +601,47 @@ function NumberValueInput({
   const formattedValue = formatTransformValue(displayValue)
   const [draft, setDraft] = useState(formattedValue)
   const [focused, setFocused] = useState(false)
+  const { scrubHandlers } = useHorizontalNumberScrub({
+    value: displayValue,
+    step,
+    onDraft: setDraft,
+    onCommit: (next) => onChange(toStoredValue(next)),
+  })
 
   useEffect(() => {
-    const parsedDraft = Number.parseFloat(draft)
-    if (!focused || !Number.isFinite(parsedDraft) || parsedDraft !== displayValue) {
-      setDraft(formattedValue)
-    }
-  }, [displayValue, draft, focused, formattedValue])
+    if (!focused) setDraft(formattedValue)
+  }, [focused, formattedValue])
 
   return (
     <input
-      type="number"
+      type="text"
+      inputMode="decimal"
       step={step}
       value={draft}
       onFocus={() => setFocused(true)}
+      {...scrubHandlers}
       onChange={(event) => {
         const next = event.currentTarget.value
         setDraft(next)
-        const parsed = Number.parseFloat(next)
-        if (Number.isFinite(parsed)) onChange(toStoredValue(parsed))
+        const parsed = parseDraftNumber(next)
+        if (parsed !== undefined) onChange(toStoredValue(parsed))
       }}
       onBlur={() => {
         setFocused(false)
-        const parsed = Number.parseFloat(draft)
-        if (!Number.isFinite(parsed)) {
+        const parsed = parseDraftNumber(draft)
+        if (parsed === undefined) {
           setDraft(formattedValue)
           return
         }
         setDraft(formatTransformValue(parsed))
         onChange(toStoredValue(parsed))
       }}
-      className={`h-7 w-full rounded border border-white/10 bg-black/40 px-1.5 text-right text-xs text-white/85 ${className}`}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter') return
+        event.preventDefault()
+        event.currentTarget.blur()
+      }}
+      className={`h-7 w-full cursor-ew-resize rounded border border-white/10 bg-black/40 px-1.5 text-right text-xs text-white/85 ${className}`}
     />
   )
 }
@@ -390,14 +666,10 @@ export function usePlacementEditor({
   onObjectHover,
   onProjectSaved,
 }: EditorStateArgs): PlacementEditorController {
-  const initialPlacements = useMemo(
-    () => getInitialPlacements(objects, sceneProject?.instances),
-    [objects, sceneProject],
+  const incomingBaseline = useMemo(
+    () => makeEditorBaseline({ slug, objects, sceneProject, baseMetricScaleFactor, baseGroundPlaneOffset }),
+    [baseGroundPlaneOffset, baseMetricScaleFactor, objects, sceneProject, slug],
   )
-  const initialSun = useMemo(() => cloneSun(sceneProject?.sun), [sceneProject])
-  const initialMetricScaleFactor = sceneProject?.metricScaleFactor ?? baseMetricScaleFactor
-  const initialGroundPlaneOffset = sceneProject?.groundPlaneOffset ??
-    scaledGroundPlaneOffset(baseGroundPlaneOffset, initialMetricScaleFactor, baseMetricScaleFactor)
   const [assetFilter, setAssetFilter] = useState<'world' | 'all'>('world')
   const visibleAssetLibrary = assetFilter === 'world'
     ? allObjectAssets.filter((asset) => asset.sourceWorldSlug === slug)
@@ -408,21 +680,28 @@ export function usePlacementEditor({
     for (const asset of objects) addAssetAliases(map, asset)
     return map
   }, [allObjectAssets, objects])
-  const [instances, setInstances] = useState(() => clonePlacements(initialPlacements))
-  const [sun, setSun] = useState(() => cloneSun(initialSun))
-  const [metricScaleFactor, setMetricScaleFactor] = useState(initialMetricScaleFactor)
-  const [groundPlaneOffset, setGroundPlaneOffset] = useState(initialGroundPlaneOffset)
+  const [baseline, setBaseline] = useState(() => incomingBaseline)
+  const [instances, setInstances] = useState(() => clonePlacements(incomingBaseline.instances))
+  const [sun, setSun] = useState(() => cloneSun(incomingBaseline.sun))
+  const [metricScaleFactor, setMetricScaleFactor] = useState(incomingBaseline.metricScaleFactor)
+  const [groundPlaneOffset, setGroundPlaneOffset] = useState(incomingBaseline.groundPlaneOffset)
+  const [groundPlaneColliderEnabled, setGroundPlaneColliderEnabled] = useState(incomingBaseline.groundPlaneColliderEnabled)
+  const [shadowCatcherOpacity, setShadowCatcherOpacity] = useState(incomingBaseline.shadowCatcherOpacity)
+  const [shadowCatcherColor, setShadowCatcherColor] = useState(incomingBaseline.shadowCatcherColor)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [mode, setMode] = useState<TransformMode>('translate')
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const clipboardRef = useRef<WorldObjectPlacement[]>([])
   const historyRef = useRef<{ past: WorldObjectPlacement[][]; future: WorldObjectPlacement[][] }>({ past: [], future: [] })
-  const loadedSlugRef = useRef(slug)
+  const baselineRef = useRef(baseline)
   const selectedIdRef = useRef(selectedId)
   const instancesRef = useRef(instances)
   const sunRef = useRef(sun)
   const metricScaleFactorRef = useRef(metricScaleFactor)
   const groundPlaneOffsetRef = useRef(groundPlaneOffset)
+  const groundPlaneColliderEnabledRef = useRef(groundPlaneColliderEnabled)
+  const shadowCatcherOpacityRef = useRef(shadowCatcherOpacity)
+  const shadowCatcherColorRef = useRef(shadowCatcherColor)
   const dropSelectedToFloorHandlerRef = useRef<(() => void) | null>(null)
   const flushSelectedTransformHandlerRef = useRef<(() => WorldObjectPlacement[] | null) | null>(null)
 
@@ -430,18 +709,28 @@ export function usePlacementEditor({
     () => instances.find((instance) => instance.instanceId === selectedId),
     [instances, selectedId],
   )
-  const dirty = signature(instances) !== signature(initialPlacements) ||
-    signature(sun) !== signature(initialSun) ||
-    metricScaleFactor !== initialMetricScaleFactor ||
-    groundPlaneOffset !== initialGroundPlaneOffset
+  const dirty = isDraftDirty(
+    baseline,
+    instances,
+    sun,
+    metricScaleFactor,
+    groundPlaneOffset,
+    groundPlaneColliderEnabled,
+    shadowCatcherOpacity,
+    shadowCatcherColor,
+  )
   const canUndo = historyRef.current.past.length > 0
   const canRedo = historyRef.current.future.length > 0
 
+  baselineRef.current = baseline
   instancesRef.current = instances
   selectedIdRef.current = selectedId
   sunRef.current = sun
   metricScaleFactorRef.current = metricScaleFactor
   groundPlaneOffsetRef.current = groundPlaneOffset
+  groundPlaneColliderEnabledRef.current = groundPlaneColliderEnabled
+  shadowCatcherOpacityRef.current = shadowCatcherOpacity
+  shadowCatcherColorRef.current = shadowCatcherColor
 
   const pushHistory = useCallback((snapshot: WorldObjectPlacement[]) => {
     historyRef.current.past = [...historyRef.current.past, clonePlacements(snapshot)].slice(-HISTORY_LIMIT)
@@ -459,27 +748,37 @@ export function usePlacementEditor({
   }, [pushHistory])
 
   useEffect(() => {
-    const next = clonePlacements(initialPlacements)
-    const nextSignature = signature(next)
-    const nextSun = cloneSun(initialSun)
+    const currentBaseline = baselineRef.current
+    const sameSlug = currentBaseline.slug === incomingBaseline.slug
+    if (sameSlug && incomingBaseline.signature === currentBaseline.signature) return
     if (
-      loadedSlugRef.current === slug &&
-      nextSignature === signature(instancesRef.current) &&
-      signature(nextSun) === signature(sunRef.current) &&
-      initialMetricScaleFactor === metricScaleFactorRef.current &&
-      initialGroundPlaneOffset === groundPlaneOffsetRef.current
+      sameSlug &&
+      isDraftDirty(
+        currentBaseline,
+        instancesRef.current,
+        sunRef.current,
+        metricScaleFactorRef.current,
+        groundPlaneOffsetRef.current,
+        groundPlaneColliderEnabledRef.current,
+        shadowCatcherOpacityRef.current,
+        shadowCatcherColorRef.current,
+      )
     ) {
       return
     }
-    loadedSlugRef.current = slug
-    setInstances(next)
-    setSun(nextSun)
-    setMetricScaleFactor(initialMetricScaleFactor)
-    setGroundPlaneOffset(initialGroundPlaneOffset)
+
+    setBaseline(incomingBaseline)
+    setInstances(clonePlacements(incomingBaseline.instances))
+    setSun(cloneSun(incomingBaseline.sun))
+    setMetricScaleFactor(incomingBaseline.metricScaleFactor)
+    setGroundPlaneOffset(incomingBaseline.groundPlaneOffset)
+    setGroundPlaneColliderEnabled(incomingBaseline.groundPlaneColliderEnabled)
+    setShadowCatcherOpacity(incomingBaseline.shadowCatcherOpacity)
+    setShadowCatcherColor(incomingBaseline.shadowCatcherColor)
     setSelectedId(null)
     historyRef.current = { past: [], future: [] }
     setSaveStatus('idle')
-  }, [initialGroundPlaneOffset, initialMetricScaleFactor, initialPlacements, initialSun, slug])
+  }, [incomingBaseline])
 
   const commitInstances = useCallback((next: WorldObjectPlacement[]) => {
     if (signature(next) === signature(instancesRef.current)) return
@@ -676,6 +975,41 @@ export function usePlacementEditor({
     updateGroundPlaneOffset(defaultGroundPlaneOffset(metricScaleFactorRef.current))
   }, [defaultGroundPlaneOffset, updateGroundPlaneOffset])
 
+  const updateGroundPlaneColliderEnabled = useCallback((enabled: boolean) => {
+    setGroundPlaneColliderEnabled((current) => {
+      if (current === enabled) return current
+      setSaveStatus('idle')
+      return enabled
+    })
+  }, [])
+
+  const updateShadowCatcherOpacity = useCallback((nextShadowCatcherOpacity: number) => {
+    if (!Number.isFinite(nextShadowCatcherOpacity)) return
+    const clampedOpacity = normalizeShadowCatcherOpacity(nextShadowCatcherOpacity)
+    setShadowCatcherOpacity((current) => {
+      if (current === clampedOpacity) return current
+      setSaveStatus('idle')
+      return clampedOpacity
+    })
+  }, [])
+
+  const resetShadowCatcherOpacity = useCallback(() => {
+    updateShadowCatcherOpacity(DEFAULT_SHADOW_CATCHER_OPACITY)
+  }, [updateShadowCatcherOpacity])
+
+  const updateShadowCatcherColor = useCallback((nextShadowCatcherColor: string) => {
+    const normalizedColor = normalizeShadowCatcherColor(nextShadowCatcherColor)
+    setShadowCatcherColor((current) => {
+      if (current === normalizedColor) return current
+      setSaveStatus('idle')
+      return normalizedColor
+    })
+  }, [])
+
+  const resetShadowCatcherColor = useCallback(() => {
+    updateShadowCatcherColor(DEFAULT_SHADOW_CATCHER_COLOR)
+  }, [updateShadowCatcherColor])
+
   const undo = useCallback(() => {
     const snapshot = historyRef.current.past[historyRef.current.past.length - 1]
     if (!snapshot) return
@@ -695,12 +1029,15 @@ export function usePlacementEditor({
   }, [])
 
   const resetEdits = useCallback(() => {
-    updateInstances(() => clonePlacements(initialPlacements))
-    setSun(cloneSun(initialSun))
-    setMetricScaleFactor(initialMetricScaleFactor)
-    setGroundPlaneOffset(initialGroundPlaneOffset)
+    updateInstances(() => clonePlacements(baseline.instances))
+    setSun(cloneSun(baseline.sun))
+    setMetricScaleFactor(baseline.metricScaleFactor)
+    setGroundPlaneOffset(baseline.groundPlaneOffset)
+    setGroundPlaneColliderEnabled(baseline.groundPlaneColliderEnabled)
+    setShadowCatcherOpacity(baseline.shadowCatcherOpacity)
+    setShadowCatcherColor(baseline.shadowCatcherColor)
     setSelectedId(null)
-  }, [initialGroundPlaneOffset, initialMetricScaleFactor, initialPlacements, initialSun, updateInstances])
+  }, [baseline, updateInstances])
 
   const openWorldFolder = useCallback(() => {
     if (!import.meta.env.DEV) return
@@ -719,6 +1056,9 @@ export function usePlacementEditor({
         sun: cloneSun(sunRef.current),
         metricScaleFactor: metricScaleFactorRef.current,
         groundPlaneOffset: groundPlaneOffsetRef.current,
+        groundPlaneColliderEnabled: groundPlaneColliderEnabledRef.current,
+        shadowCatcherOpacity: shadowCatcherOpacityRef.current,
+        shadowCatcherColor: shadowCatcherColorRef.current,
       }
       setSaveStatus('saving')
       const response = await fetch(`/__scene-project?slug=${encodeURIComponent(slug)}`, {
@@ -728,12 +1068,39 @@ export function usePlacementEditor({
       })
       if (!response.ok) throw new Error(await response.text())
       const savedProject = await response.json() as WorldSceneProject
-      setInstances(clonePlacements(savedProject.instances))
-      setSun(cloneSun(savedProject.sun))
       const savedMetricScaleFactor = savedProject.metricScaleFactor ?? baseMetricScaleFactor
+      const savedGroundPlaneOffset = savedProject.groundPlaneOffset ??
+        scaledGroundPlaneOffset(baseGroundPlaneOffset, savedMetricScaleFactor, baseMetricScaleFactor)
+      const savedShadowCatcherOpacity = normalizeShadowCatcherOpacity(savedProject.shadowCatcherOpacity)
+      const savedShadowCatcherColor = normalizeShadowCatcherColor(savedProject.shadowCatcherColor)
+      const savedInstances = clonePlacements(savedProject.instances)
+      const savedSun = cloneSun(savedProject.sun)
+      setBaseline({
+        slug,
+        instances: savedInstances,
+        sun: savedSun,
+        metricScaleFactor: savedMetricScaleFactor,
+        groundPlaneOffset: savedGroundPlaneOffset,
+        groundPlaneColliderEnabled: savedProject.groundPlaneColliderEnabled ?? true,
+        shadowCatcherOpacity: savedShadowCatcherOpacity,
+        shadowCatcherColor: savedShadowCatcherColor,
+        signature: editorStateSignature(
+          savedInstances,
+          savedSun,
+          savedMetricScaleFactor,
+          savedGroundPlaneOffset,
+          savedProject.groundPlaneColliderEnabled ?? true,
+          savedShadowCatcherOpacity,
+          savedShadowCatcherColor,
+        ),
+      })
+      setInstances(clonePlacements(savedInstances))
+      setSun(cloneSun(savedSun))
       setMetricScaleFactor(savedMetricScaleFactor)
-      setGroundPlaneOffset(savedProject.groundPlaneOffset ??
-        scaledGroundPlaneOffset(baseGroundPlaneOffset, savedMetricScaleFactor, baseMetricScaleFactor))
+      setGroundPlaneOffset(savedGroundPlaneOffset)
+      setGroundPlaneColliderEnabled(savedProject.groundPlaneColliderEnabled ?? true)
+      setShadowCatcherOpacity(savedShadowCatcherOpacity)
+      setShadowCatcherColor(savedShadowCatcherColor)
       onProjectSaved?.(savedProject)
       setSaveStatus('saved')
       return true
@@ -748,10 +1115,13 @@ export function usePlacementEditor({
     if (!editing || !sceneProjectReady || sceneProject || !objects.length || !import.meta.env.DEV) return
     const project: WorldSceneProject = {
       version: projectVersion,
-      instances: clonePlacements(initialPlacements),
-      sun: cloneSun(initialSun),
-      metricScaleFactor: initialMetricScaleFactor,
-      groundPlaneOffset: initialGroundPlaneOffset,
+      instances: clonePlacements(baseline.instances),
+      sun: cloneSun(baseline.sun),
+      metricScaleFactor: baseline.metricScaleFactor,
+      groundPlaneOffset: baseline.groundPlaneOffset,
+      groundPlaneColliderEnabled: baseline.groundPlaneColliderEnabled,
+      shadowCatcherOpacity: baseline.shadowCatcherOpacity,
+      shadowCatcherColor: baseline.shadowCatcherColor,
     }
     fetch(`/__scene-project?slug=${encodeURIComponent(slug)}`, {
       method: 'POST',
@@ -766,7 +1136,7 @@ export function usePlacementEditor({
       .catch((error) => {
         console.warn('Failed to initialize scene project.', error)
       })
-  }, [editing, initialGroundPlaneOffset, initialMetricScaleFactor, initialPlacements, initialSun, objects.length, onProjectSaved, sceneProject, sceneProjectReady, slug])
+  }, [baseline, editing, objects.length, onProjectSaved, sceneProject, sceneProjectReady, slug])
 
   useEffect(() => {
     if (!editing || !dirty) return
@@ -879,6 +1249,14 @@ export function usePlacementEditor({
     groundPlaneOffset,
     resetGroundPlaneOffset,
     updateGroundPlaneOffset,
+    groundPlaneColliderEnabled,
+    updateGroundPlaneColliderEnabled,
+    shadowCatcherOpacity,
+    resetShadowCatcherOpacity,
+    updateShadowCatcherOpacity,
+    shadowCatcherColor,
+    resetShadowCatcherColor,
+    updateShadowCatcherColor,
     undo,
     redo,
     resetEdits,
@@ -889,12 +1267,13 @@ export function usePlacementEditor({
 }
 
 export function PlacementEditorScene({ controller, renderMode }: PlacementEditorSceneProps) {
-  const { scene } = useThree()
+  const { camera, scene } = useThree()
   const transformRef = useRef<any>(null)
   const selectedObjectRef = useRef<THREE.Group>(null)
   const selectionSuppressedRef = useRef(false)
   const selectionSuppressionTimeoutRef = useRef<number | undefined>(undefined)
   const [selectedObject, setSelectedObject] = useState<THREE.Group>()
+  const [hoveredInstanceId, setHoveredInstanceId] = useState<string | null>(null)
   const dragStartRef = useRef<WorldObjectPlacement | null>(null)
   const raycasterRef = useRef(new THREE.Raycaster())
   const selectedInstance = controller.selectedInstance
@@ -966,8 +1345,16 @@ export function PlacementEditorScene({ controller, renderMode }: PlacementEditor
       event.stopPropagation()
       return
     }
-    controller.selectInstance(event, instanceId)
-  }, [controller])
+    controller.selectInstance(event, nearestEditableObjectInstanceId(event, instanceId, camera))
+  }, [camera, controller])
+
+  const hoverInstance = useCallback((event: ThreeEvent<PointerEvent>, instanceId: string) => {
+    setHoveredInstanceId(nearestEditableObjectInstanceId(event, instanceId, camera))
+  }, [camera])
+
+  const clearHoveredInstance = useCallback((_event: ThreeEvent<PointerEvent>, instanceId: string) => {
+    setHoveredInstanceId((current) => (current === instanceId ? null : current))
+  }, [])
 
   useEffect(() => {
     controller.setFlushSelectedTransformHandler(bakeSelectedTransform)
@@ -1059,11 +1446,14 @@ export function PlacementEditorScene({ controller, renderMode }: PlacementEditor
               placement={instance}
               selected={false}
               externallyHovered={
+                hoveredInstanceId === instance.instanceId ||
                 controller.hoveredObjectInstanceId === instance.instanceId ||
                 (!controller.hoveredObjectInstanceId && controller.hoveredObjectAssetId === asset.assetId)
               }
               renderMode={renderMode}
               onSelect={selectInstance}
+              onHover={hoverInstance}
+              onHoverEnd={clearHoveredInstance}
             />
           )
         })}
@@ -1075,11 +1465,14 @@ export function PlacementEditorScene({ controller, renderMode }: PlacementEditor
               placement={selectedInstance}
               selected
               externallyHovered={
+                hoveredInstanceId === selectedInstance.instanceId ||
                 controller.hoveredObjectInstanceId === selectedInstance.instanceId ||
                 (!controller.hoveredObjectInstanceId && controller.hoveredObjectAssetId === selectedAsset.assetId)
               }
               renderMode={renderMode}
               onSelect={selectInstance}
+              onHover={hoverInstance}
+              onHoverEnd={clearHoveredInstance}
               setRef={(group) => {
                 if (selectedObjectRef.current === group) return
                 selectedObjectRef.current = group
@@ -1108,47 +1501,50 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
   const selectedAsset = selectedInstance
     ? controller.assetsById.get(placementAssetKey(selectedInstance)) ?? controller.assetsById.get(selectedInstance.objectId)
     : undefined
+  const showSaveStatus = controller.saveStatus === 'error' || controller.saveStatus === 'saved' || !import.meta.env.DEV
 
   return (
     <div className="pointer-events-none fixed inset-0 z-20 text-sm text-white">
-      <div className={`${chrome.bar} chrome-enter-center pointer-events-auto fixed left-1/2 top-4 flex gap-1`}>
-        <AppButton
-          className={`justify-center ${controller.mode === 'translate' ? 'bg-white/15 opacity-100' : ''}`}
-          onClick={() => controller.setMode('translate')}
-          aria-label="Position tool"
-        >
-          <ArrowsOutCardinal size={15} weight="regular" />
-          Position
-        </AppButton>
-        <AppButton
-          className={`justify-center ${controller.mode === 'rotate' ? 'bg-white/15 opacity-100' : ''}`}
-          onClick={() => controller.setMode('rotate')}
-          aria-label="Rotation tool"
-        >
-          <ArrowClockwise size={15} weight="regular" />
-          Rotation
-        </AppButton>
-        <AppButton
-          className={`justify-center ${controller.mode === 'scale' ? 'bg-white/15 opacity-100' : ''}`}
-          onClick={() => controller.setMode('scale')}
-          aria-label="Scale tool"
-        >
-          <CornersOut size={15} weight="regular" />
-          Scale
-        </AppButton>
-        <AppButton
-          className="justify-center"
-          disabled={!controller.selectedId}
-          onClick={controller.dropSelectedToFloor}
-          aria-label="Drop selected object to floor"
-          title="Drop to floor"
-        >
-          <ArrowDown size={15} weight="regular" />
-          Drop
-        </AppButton>
+      <div className="pointer-events-auto fixed left-1/2 top-4 -translate-x-1/2">
+        <div className={`${chrome.bar} flex flex-shrink-0 gap-1`}>
+          <AppButton
+            className={`justify-center ${controller.mode === 'translate' ? 'bg-white/15 opacity-100' : ''}`}
+            onClick={() => controller.setMode('translate')}
+            aria-label="Position tool"
+          >
+            <ArrowsOutCardinal size={15} weight="regular" />
+            Position
+          </AppButton>
+          <AppButton
+            className={`justify-center ${controller.mode === 'rotate' ? 'bg-white/15 opacity-100' : ''}`}
+            onClick={() => controller.setMode('rotate')}
+            aria-label="Rotation tool"
+          >
+            <ArrowClockwise size={15} weight="regular" />
+            Rotation
+          </AppButton>
+          <AppButton
+            className={`justify-center ${controller.mode === 'scale' ? 'bg-white/15 opacity-100' : ''}`}
+            onClick={() => controller.setMode('scale')}
+            aria-label="Scale tool"
+          >
+            <CornersOut size={15} weight="regular" />
+            Scale
+          </AppButton>
+          <AppButton
+            className="justify-center"
+            disabled={!controller.selectedId}
+            onClick={controller.dropSelectedToFloor}
+            aria-label="Drop selected object to floor"
+            title="Drop to floor"
+          >
+            <ArrowDown size={15} weight="regular" />
+            Drop
+          </AppButton>
+        </div>
       </div>
 
-      <ChromePanel className="pointer-events-auto fixed font-mono right-4 top-4 w-72 p-2 whitespace-nowrap">
+      <ChromePanel className="pointer-events-auto fixed right-4 top-4 w-72 p-2 font-mono whitespace-nowrap">
         <div className="flex flex-col gap-1">
           {selectedInstance ? (
             <>
@@ -1182,6 +1578,7 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
                 >
                   <option value="rigidbody">Rigidbody</option>
                   <option value="static">Static</option>
+                  <option value="ghost">Ghost</option>
                 </select>
               </label>
             </>
@@ -1221,6 +1618,41 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
               <span className="text-[10px] tracking-[0.16em] text-white/40">HDRI</span>
             </div>
             <div className="grid grid-cols-[2.75rem_1fr_auto] items-center gap-1">
+              <span className="text-[10px] tracking-[0.16em] text-white/40">Shadow</span>
+              <NumberValueInput
+                value={controller.shadowCatcherOpacity}
+                step={0.01}
+                onChange={controller.updateShadowCatcherOpacity}
+                className="h-6 text-[11px]"
+              />
+              <AppButton
+                onClick={controller.resetShadowCatcherOpacity}
+                className="h-6 px-1.5 py-0 text-[10px] text-white/55"
+                aria-label="Reset shadow opacity"
+                title="Reset shadow opacity"
+              >
+                Reset
+              </AppButton>
+            </div>
+            <div className="grid grid-cols-[2.75rem_1fr_auto] items-center gap-1">
+              <span className="text-[10px] tracking-[0.16em] text-white/40">Color</span>
+              <input
+                type="color"
+                value={controller.shadowCatcherColor}
+                onChange={(event) => controller.updateShadowCatcherColor(event.currentTarget.value)}
+                className="h-6 w-full cursor-pointer rounded border border-white/10 bg-black/40"
+                aria-label="Shadow color"
+              />
+              <AppButton
+                onClick={controller.resetShadowCatcherColor}
+                className="h-6 px-1.5 py-0 text-[10px] text-white/55"
+                aria-label="Reset shadow color"
+                title="Reset shadow color"
+              >
+                Reset
+              </AppButton>
+            </div>
+            <div className="grid grid-cols-[2.75rem_1fr_auto] items-center gap-1">
               <span className="text-[10px] tracking-[0.16em] text-white/40">World</span>
               <NumberValueInput
                 value={controller.metricScaleFactor}
@@ -1254,47 +1686,60 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
                 Reset
               </AppButton>
             </div>
+            <div className="grid grid-cols-[2.75rem_1fr] items-center gap-1">
+              <span className="text-[10px] tracking-[0.16em] text-white/40">Floor</span>
+              <AppButton
+                active={controller.groundPlaneColliderEnabled}
+                onClick={() => controller.updateGroundPlaneColliderEnabled(!controller.groundPlaneColliderEnabled)}
+                className={`h-6 justify-center px-1.5 py-0 text-[10px] ${controller.groundPlaneColliderEnabled ? 'bg-white/15 opacity-100' : 'text-white/55'}`}
+                aria-label={controller.groundPlaneColliderEnabled ? 'Disable flat ground floor collider' : 'Enable flat ground floor collider'}
+                aria-pressed={controller.groundPlaneColliderEnabled}
+                title="Flat ground floor collider"
+              >
+                {controller.groundPlaneColliderEnabled ? 'Collider On' : 'Collider Off'}
+              </AppButton>
+            </div>
         </div>
       </ChromePanel>
 
-      <div className={`${chrome.enter} fixed inset-y-4 left-4 flex w-[min(24rem,calc(100vw-2rem))] max-w-sm flex-col gap-2`}>
-        <div className="flex min-h-0 flex-col gap-2">
-          <ChromePanel className="pointer-events-auto p-2">
-            <div className="flex items-center justify-between gap-2">
+      <div className={`${chrome.enter} fixed left-4 top-28 flex max-h-[calc(100vh-8rem)] w-64 max-w-[calc(100vw-2rem)] flex-col gap-1 whitespace-nowrap text-sm`}>
+        <div className="flex min-h-0 flex-col gap-1">
+          <div className={twMerge(chrome.bar, 'pointer-events-auto')}>
+            <div className="flex items-center justify-between gap-1">
               <div className="flex min-w-0 items-center gap-1">
-              <a
-                className="inline-flex h-8 w-8 items-center justify-center rounded px-2 py-1 text-xs opacity-80 transition-[background-color,opacity] hover:bg-white/10 hover:opacity-100"
-                href={`/${controller.slug}`}
-                aria-label="Return to world"
-                onClick={(event) => {
-                  event.preventDefault()
-                  if (controller.dirty && !window.confirm('You have unsaved scene changes. Leave without saving?')) return
-                  navigate(`/${controller.slug}`)
-                }}
-              >
-                <ArrowLeft size={16} weight="regular" />
-              </a>
-              <AppButton
-                className={`h-8 w-8 justify-center ${controller.dirty ? 'text-yellow-300 opacity-100' : ''}`}
-                disabled={!import.meta.env.DEV || controller.saveStatus === 'saving'}
-                onClick={controller.saveProject}
-                aria-label={controller.dirty ? 'Save unsaved scene changes' : 'Save project'}
-                title={controller.dirty ? 'Unsaved changes' : 'Saved'}
-              >
-                <FloppyDisk size={16} weight="regular" />
-              </AppButton>
-              <AppButton
-                className="h-8 w-8 justify-center"
-                disabled={!import.meta.env.DEV}
-                onClick={controller.openWorldFolder}
-                aria-label="Open world folder"
-              >
-                <FolderOpen size={16} weight="regular" />
-              </AppButton>
-              </div>
-              <div className="flex items-center gap-1">
+                <a
+                  className="inline-flex h-7 w-7 items-center justify-center rounded p-1 text-xs opacity-80 transition-[background-color,opacity] hover:bg-white/10 hover:opacity-100"
+                  href={`/${controller.slug}`}
+                  aria-label="Return to world"
+                  onClick={(event) => {
+                    event.preventDefault()
+                    if (controller.dirty && !window.confirm('You have unsaved scene changes. Leave without saving?')) return
+                    navigate(`/${controller.slug}`)
+                  }}
+                >
+                  <ArrowLeft size={16} weight="regular" />
+                </a>
                 <AppButton
-                  className="h-8 w-8 justify-center"
+                  className={`h-7 w-7 justify-center p-1 ${controller.dirty ? 'text-yellow-300 opacity-100' : ''}`}
+                  disabled={!import.meta.env.DEV || controller.saveStatus === 'saving'}
+                  onClick={controller.saveProject}
+                  aria-label={controller.dirty ? 'Save unsaved scene changes' : 'Save project'}
+                  title={controller.dirty ? 'Unsaved changes' : 'Saved'}
+                >
+                  <FloppyDisk size={16} weight="regular" />
+                </AppButton>
+                <AppButton
+                  className="h-7 w-7 justify-center p-1"
+                  disabled={!import.meta.env.DEV}
+                  onClick={controller.openWorldFolder}
+                  aria-label="Open world folder"
+                >
+                  <FolderOpen size={16} weight="regular" />
+                </AppButton>
+              </div>
+              <div className="ml-auto flex items-center gap-1">
+                <AppButton
+                  className="h-7 w-7 justify-center p-1"
                   disabled={!controller.canUndo}
                   onClick={controller.undo}
                   aria-label="Undo"
@@ -1302,7 +1747,7 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
                   <ArrowUUpLeft size={16} weight="regular" />
                 </AppButton>
                 <AppButton
-                  className="h-8 w-8 justify-center"
+                  className="h-7 w-7 justify-center p-1"
                   disabled={!controller.canRedo}
                   onClick={controller.redo}
                   aria-label="Redo"
@@ -1311,20 +1756,22 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
                 </AppButton>
               </div>
             </div>
-            <div className="mt-1 text-xs leading-5 text-white/65">
-              {controller.saveStatus === 'error' && <div className="text-red-300">Save failed.</div>}
-              {controller.saveStatus === 'saved' && <div className="text-green-300">Saved scene.json.</div>}
-              {!import.meta.env.DEV && <div>Saving and folder opening are available in dev only.</div>}
-            </div>
-          </ChromePanel>
+            {showSaveStatus && (
+              <div className="mt-1 text-xs leading-4 text-white/65">
+                {controller.saveStatus === 'error' && <div className="text-red-300">Save failed.</div>}
+                {controller.saveStatus === 'saved' && <div className="text-green-300">Saved scene.json.</div>}
+                {!import.meta.env.DEV && <div>Saving and folder opening are available in dev only.</div>}
+              </div>
+            )}
+          </div>
 
           <ChromePanel className="pointer-events-auto min-h-0 overflow-hidden">
             <div className={chrome.sectionHeader}>
               <span>Scene Graph</span>
               <span className="normal-case tracking-normal">{controller.selectedId ? '1 selected' : 'None selected'}</span>
             </div>
-            <div className="max-h-[40vh] overflow-y-auto overflow-x-hidden">
-              <div className="p-1 pr-3">
+            <div className="max-h-[34vh] overflow-y-auto overflow-x-hidden">
+              <div className="p-1 pr-2">
               {controller.instances.map((instance) => {
                 const asset = controller.assetsById.get(placementAssetKey(instance)) ?? controller.assetsById.get(instance.objectId)
                 const selected = controller.selectedId === instance.instanceId
@@ -1341,7 +1788,7 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
                   >
                     <button
                       type="button"
-                      className="min-w-0 flex flex-1 items-center gap-2 rounded px-2 py-1 text-left"
+                      className="min-w-0 flex flex-1 items-center gap-1.5 rounded px-1.5 py-0.5 text-left"
                       onClick={() => controller.selectFromOverlay(instance.instanceId)}
                     >
                       <ChromeThumbnail thumbnailUrl={asset?.thumbnailUrl} alt={asset?.name ?? instance.objectId} />
@@ -1357,7 +1804,7 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
                         <span className="block truncate text-[10px] text-white/35">{instance.instanceId}</span>
                       </span>
                     </button>
-                    <div className="flex flex-shrink-0 items-center gap-0.5 px-1 opacity-0 transition-opacity group-hover:opacity-100">
+                    <div className="flex flex-shrink-0 items-center gap-0.5 px-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                       <AppButton
                         className="h-7 w-7 justify-center"
                         onClick={(event) => {
@@ -1383,7 +1830,7 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
                 )
               })}
               {!controller.instances.length && (
-                <div className="px-2 py-4 text-xs text-white/45">No object instances in this scene.</div>
+                <div className="px-2 py-3 text-xs text-white/45">No object instances in this scene.</div>
               )}
               </div>
             </div>
@@ -1416,7 +1863,7 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
               </div>
             </div>
             <div className="max-h-[28vh] overflow-y-auto overflow-x-hidden">
-              <div className="p-1 pr-3">
+              <div className="p-1 pr-2">
               {controller.visibleAssetLibrary.map((asset) => (
                 <div
                   key={assetKey(asset)}
@@ -1426,7 +1873,7 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
                 >
                   <button
                     type="button"
-                    className="min-w-0 flex flex-1 items-center gap-2 rounded px-2 py-1 text-left"
+                    className="min-w-0 flex flex-1 items-center gap-1.5 rounded px-1.5 py-0.5 text-left"
                     onClick={() => controller.addAsset(asset)}
                   >
                     <ChromeThumbnail thumbnailUrl={asset.thumbnailUrl} alt={asset.name} />
@@ -1438,7 +1885,7 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
                     </span>
                   </button>
                   <AppButton
-                    className="mr-1 h-7 w-7 justify-center opacity-0 group-hover:opacity-100"
+                    className="mr-0.5 h-7 w-7 justify-center opacity-0 group-hover:opacity-100"
                     onClick={() => controller.addAsset(asset)}
                     aria-label={`Add ${asset.name} to scene`}
                     title={`Add ${asset.name}`}
@@ -1448,7 +1895,7 @@ export function PlacementEditorOverlay({ controller }: PlacementEditorOverlayPro
                 </div>
               ))}
               {!controller.visibleAssetLibrary.length && (
-                <div className="px-2 py-4 text-xs text-white/45">No object assets found.</div>
+                <div className="px-2 py-3 text-xs text-white/45">No object assets found.</div>
               )}
               </div>
             </div>

@@ -3,7 +3,7 @@ import { ThreeEvent, useThree } from '@react-three/fiber'
 import { type RapierRigidBody, useAfterPhysicsStep, useBeforePhysicsStep, useRapier } from '@react-three/rapier'
 import * as THREE from 'three'
 import { markObjectInteraction } from '../interaction/pointerGuards'
-import type { SceneObjectHandle } from './SceneObject'
+import { SCENE_OBJECT_INSTANCE_ID_KEY, type SceneObjectHandle } from './SceneObject'
 
 const GRAB_LINEAR_SPEED_LIMIT = 5 
 const GRAB_ANGULAR_SPEED_LIMIT = 10
@@ -13,6 +13,7 @@ type ObjectRefMap = Map<string, RefObject<SceneObjectHandle | null>>
 interface UseObjectGrabArgs {
   anchorRef: RefObject<RapierRigidBody | null>
   objectRefs: RefObject<ObjectRefMap>
+  isObjectEligible?: (objectId: string) => boolean
 }
 
 interface ActiveGrab {
@@ -34,7 +35,17 @@ const _inverseBodyRotation = new THREE.Quaternion()
 const _localAnchor = new THREE.Vector3()
 const _bodyLinearVelocity = new THREE.Vector3()
 const _bodyAngularVelocity = new THREE.Vector3()
+const _objectCenter = new THREE.Vector3()
+const _projectedObjectCenter = new THREE.Vector3()
 const _zeroVector = { x: 0, y: 0, z: 0 }
+
+interface PointerTarget {
+  objectId: string
+  handle: SceneObjectHandle
+  point: THREE.Vector3
+  centerDistanceSq: number
+  hitDistance: number
+}
 
 function isBodyUsable(body: RapierRigidBody | null | undefined): body is RapierRigidBody {
   if (!body) return false
@@ -52,6 +63,24 @@ function vectorLike(vector: THREE.Vector3) {
 
 function quaternionLike(quaternion: THREE.Quaternion) {
   return { x: quaternion.x, y: quaternion.y, z: quaternion.z, w: quaternion.w }
+}
+
+function objectIdFromIntersectionObject(object: THREE.Object3D) {
+  let current: THREE.Object3D | null = object
+  while (current) {
+    const objectId = current.userData[SCENE_OBJECT_INSTANCE_ID_KEY]
+    if (typeof objectId === 'string') return objectId
+    current = current.parent
+  }
+  return null
+}
+
+function centerDistanceSqToPointer(event: ThreeEvent<PointerEvent>, center: THREE.Vector3, camera: THREE.Camera) {
+  _projectedObjectCenter.copy(center).project(camera)
+  return (
+    (_projectedObjectCenter.x - event.pointer.x) ** 2 +
+    (_projectedObjectCenter.y - event.pointer.y) ** 2
+  )
 }
 
 function computePointerNdc(element: HTMLElement, clientX: number, clientY: number) {
@@ -96,7 +125,7 @@ function clampBodyVelocity(body: RapierRigidBody) {
   return true
 }
 
-export function useObjectGrab({ anchorRef, objectRefs }: UseObjectGrabArgs) {
+export function useObjectGrab({ anchorRef, objectRefs, isObjectEligible }: UseObjectGrabArgs) {
   const { camera, gl } = useThree()
   const { rapier, world } = useRapier()
   const [activeObjectId, setActiveObjectId] = useState<string | null>(null)
@@ -210,19 +239,67 @@ export function useObjectGrab({ anchorRef, objectRefs }: UseObjectGrabArgs) {
     [anchorRef, camera, endGrab, gl.domElement, rapier.JointData, removeJoint, setActiveObjectIdSafe, world],
   )
 
+  const getPointerTarget = useCallback(
+    (fallbackObjectId: string, event: ThreeEvent<PointerEvent>): PointerTarget | null => {
+      const seenObjectIds = new Set<string>()
+      let best: PointerTarget | null = null
+
+      for (const intersection of event.intersections) {
+        const objectId = objectIdFromIntersectionObject(intersection.object)
+        if (!objectId || seenObjectIds.has(objectId)) continue
+        seenObjectIds.add(objectId)
+        if (isObjectEligible && !isObjectEligible(objectId)) continue
+
+        const handle = objectRefs.current.get(objectId)?.current
+        if (!handle || !isBodyUsable(handle.rigidBody)) continue
+
+        const centerDistanceSq = centerDistanceSqToPointer(event, handle.getFocusPoint(_objectCenter), camera)
+        const hitDistance = Number.isFinite(intersection.distance) ? intersection.distance : Number.POSITIVE_INFINITY
+        if (
+          !best ||
+          centerDistanceSq < best.centerDistanceSq ||
+          (centerDistanceSq === best.centerDistanceSq && hitDistance < best.hitDistance)
+        ) {
+          best = {
+            objectId,
+            handle,
+            point: intersection.point.clone(),
+            centerDistanceSq,
+            hitDistance,
+          }
+        }
+      }
+
+      if (best) return best
+      if (isObjectEligible && !isObjectEligible(fallbackObjectId)) return null
+
+      const fallbackHandle = objectRefs.current.get(fallbackObjectId)?.current
+      if (!fallbackHandle || !isBodyUsable(fallbackHandle.rigidBody)) return null
+      return {
+        objectId: fallbackObjectId,
+        handle: fallbackHandle,
+        point: event.point.clone(),
+        centerDistanceSq: centerDistanceSqToPointer(event, fallbackHandle.getFocusPoint(_objectCenter), camera),
+        hitDistance: event.distance,
+      }
+    },
+    [camera, isObjectEligible, objectRefs],
+  )
+
   const onPointerDown = useCallback(
     (objectId: string, event: ThreeEvent<PointerEvent>) => {
-      const objectRef = objectRefs.current.get(objectId)
-      const handle = objectRef?.current
-      if (!isBodyUsable(handle?.rigidBody)) return
-      if (event.button !== 0) return
+      if (event.button !== 0) return false
+      const target = getPointerTarget(objectId, event)
+      if (!target) return false
 
       event.stopPropagation()
       event.nativeEvent.preventDefault()
       markObjectInteraction()
-      beginGrab(objectId, handle, event.pointerId, event.clientX, event.clientY, event.point.clone())
+      target.handle.playInteractionSfx()
+      beginGrab(target.objectId, target.handle, event.pointerId, event.clientX, event.clientY, target.point)
+      return true
     },
-    [beginGrab, objectRefs],
+    [beginGrab, getPointerTarget],
   )
 
   const resetObjects = useCallback(() => {

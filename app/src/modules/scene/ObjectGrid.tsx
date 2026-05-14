@@ -1,15 +1,19 @@
 import { Component, createRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { useFrame, useThree } from '@react-three/fiber'
+import { ThreeEvent, useFrame, useThree } from '@react-three/fiber'
 import { RigidBody, type RapierRigidBody } from '@react-three/rapier'
 import * as THREE from 'three'
 import type { WorldObjectAsset, WorldObjectPhysics, WorldObjectPlacement } from '../../types/world'
 import { useDebugStore } from '../../store/debug'
-import { SceneObject, type SceneObjectHandle } from './SceneObject'
+import { SCENE_OBJECT_INSTANCE_ID_KEY, SceneObject, type SceneObjectHandle } from './SceneObject'
 import { useObjectGrab } from './useObjectGrab'
 import { cameraFocusTarget, pendingFocusId } from '../camera/cameraFocus'
 import { getInitialPlacements } from './placements'
 
 const _focusPoint = new THREE.Vector3()
+const _hoverObjectCenter = new THREE.Vector3()
+const _projectedHoverObjectCenter = new THREE.Vector3()
+
+type ObjectRefMap = Map<string, RefObject<SceneObjectHandle | null>>
 
 interface RenderedObject {
   instanceId: string
@@ -23,8 +27,6 @@ interface RenderedObject {
 interface Props {
   objects: WorldObjectAsset[]
   placements?: WorldObjectPlacement[]
-  hoveredObjectAssetId?: string | null
-  hoveredObjectInstanceId?: string | null
 }
 
 interface ObjectLoadErrorBoundaryProps {
@@ -85,16 +87,71 @@ function resolveRenderedObjects(
   })
 }
 
-export function ObjectGrid({ objects, placements, hoveredObjectAssetId, hoveredObjectInstanceId }: Props) {
-  const { gl } = useThree()
+function objectIdFromIntersectionObject(object: THREE.Object3D) {
+  let current: THREE.Object3D | null = object
+  while (current) {
+    const objectId = current.userData[SCENE_OBJECT_INSTANCE_ID_KEY]
+    if (typeof objectId === 'string') return objectId
+    current = current.parent
+  }
+  return null
+}
+
+function nearestGrabbableObjectId(
+  event: ThreeEvent<PointerEvent>,
+  fallbackObjectId: string,
+  camera: THREE.Camera,
+  objectRefs: ObjectRefMap,
+  grabbableObjectIds: Set<string>,
+) {
+  const seenObjectIds = new Set<string>()
+  let best: { objectId: string; centerDistanceSq: number; hitDistance: number } | null = null
+
+  for (const intersection of event.intersections) {
+    const objectId = objectIdFromIntersectionObject(intersection.object)
+    if (!objectId || seenObjectIds.has(objectId) || !grabbableObjectIds.has(objectId)) continue
+    seenObjectIds.add(objectId)
+
+    const handle = objectRefs.get(objectId)?.current
+    if (!handle) continue
+    handle.getFocusPoint(_hoverObjectCenter)
+    _projectedHoverObjectCenter.copy(_hoverObjectCenter).project(camera)
+    const centerDistanceSq =
+      (_projectedHoverObjectCenter.x - event.pointer.x) ** 2 +
+      (_projectedHoverObjectCenter.y - event.pointer.y) ** 2
+    const hitDistance = Number.isFinite(intersection.distance) ? intersection.distance : Number.POSITIVE_INFINITY
+    if (
+      !best ||
+      centerDistanceSq < best.centerDistanceSq ||
+      (centerDistanceSq === best.centerDistanceSq && hitDistance < best.hitDistance)
+    ) {
+      best = { objectId, centerDistanceSq, hitDistance }
+    }
+  }
+
+  if (best) return best.objectId
+  return grabbableObjectIds.has(fallbackObjectId) ? fallbackObjectId : null
+}
+
+export function ObjectGrid({ objects, placements }: Props) {
+  const { camera, gl } = useThree()
   const [hoveredObjectId, setHoveredObjectId] = useState<string | null>(null)
   const renderedObjects = useMemo(() => resolveRenderedObjects(objects, placements), [objects, placements])
   const objectRenderMode = useDebugStore((s) => s.objectRenderMode)
   const objectResetToken = useDebugStore((s) => s.objectResetToken)
   const objectRefs = useRef(new Map<string, RefObject<SceneObjectHandle | null>>())
   const anchorRef = useRef<RapierRigidBody>(null)
-  const { activeObjectId, onPointerDown, resetObjects, activeGrabRef, cancelGrab } = useObjectGrab({ anchorRef, objectRefs })
   const anchorSphereRef = useRef<THREE.Mesh>(null)
+  const grabbableObjectIds = useMemo(
+    () => new Set(renderedObjects.filter((object) => object.physics === 'rigidbody').map((object) => object.instanceId)),
+    [renderedObjects],
+  )
+  const isObjectEligible = useCallback((objectId: string) => grabbableObjectIds.has(objectId), [grabbableObjectIds])
+  const { activeObjectId, onPointerDown, resetObjects, activeGrabRef, cancelGrab } = useObjectGrab({
+    anchorRef,
+    objectRefs,
+    isObjectEligible,
+  })
 
   useLayoutEffect(() => {
     const objectIds = new Set([
@@ -123,17 +180,18 @@ export function ObjectGrid({ objects, placements, hoveredObjectAssetId, hoveredO
     return objectRef
   }
 
-  const handleHover = useCallback((objectId: string, hovering: boolean) => {
+  const handleHover = useCallback((event: ThreeEvent<PointerEvent>, objectId: string, hovering: boolean) => {
+    const nearestObjectId = hovering
+      ? nearestGrabbableObjectId(event, objectId, camera, objectRefs.current, grabbableObjectIds)
+      : null
     setHoveredObjectId((current) => {
-      if (hovering) return objectId
-      return current === objectId ? null : current
+      if (hovering) return nearestObjectId
+      return current ? null : current
     })
-  }, [])
+  }, [camera, grabbableObjectIds])
 
   useEffect(() => {
-    const hoveredObject = hoveredObjectId ? renderedObjects.find((object) => object.instanceId === hoveredObjectId) : undefined
-    const canGrabHovered = !hoveredObject || hoveredObject.physics !== 'static'
-    gl.domElement.style.cursor = activeObjectId ? 'move' : hoveredObjectId && canGrabHovered ? 'grab' : ''
+    gl.domElement.style.cursor = activeObjectId ? 'move' : hoveredObjectId ? 'grab' : ''
     return () => {
       gl.domElement.style.cursor = ''
     }
@@ -181,11 +239,6 @@ export function ObjectGrid({ objects, placements, hoveredObjectAssetId, hoveredO
             scale={object.scale}
             physics={object.physics}
             renderMode={objectRenderMode}
-            isHovered={
-              hoveredObjectId === object.instanceId ||
-              hoveredObjectInstanceId === object.instanceId ||
-              (!hoveredObjectInstanceId && hoveredObjectAssetId === object.asset.assetId)
-            }
             onHover={handleHover}
             onPointerDown={(event) => onPointerDown(object.instanceId, event)}
           />

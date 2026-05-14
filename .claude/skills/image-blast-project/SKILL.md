@@ -2,7 +2,7 @@
 name: image-blast-project
 description: Create, inspect, and manage an IMAGE-BLAST project envelope under worlds/<slug>. Use before other image-blast skills (image-blast-uncover, image-blast-world, image-blast-3d, etc.) or whenever the user asks about active project state.
 argument-hint: [world-name or description] [optional instructions]
-allowed-tools: Read Write Glob Bash(ls *) Bash(node .claude/scripts/project/project-state.mjs *) Bash(node .claude/scripts/project/indexed-path.mjs *) Bash(node .claude/scripts/project/download.mjs *) Bash(node .claude/scripts/project/ensure-local-assets.mjs *) Bash(node .claude/scripts/project/delete.mjs *) Bash(node .claude/scripts/project/show-folder.mjs *)
+allowed-tools: Read Write Glob Bash(ls *) Bash(node .claude/scripts/project/project-state.mjs *) Bash(node .claude/scripts/project/indexed-path.mjs *) Bash(node .claude/scripts/project/download.mjs *) Bash(node .claude/scripts/project/ensure-local-assets.mjs *) Bash(node .claude/scripts/project/delete.mjs *)
 ---
 
 Create or inspect an Image Blast project. Input: `$ARGUMENTS`.
@@ -21,12 +21,6 @@ Use generic project tools for local indexed asset path computation, explicit dow
 
 ```bash
 node .claude/scripts/project/project-state.mjs --world "<slug>" --stage-input
-```
-
-Open the project folder for the user after creating or resolving it:
-
-```bash
-node .claude/scripts/project/show-folder.mjs "worlds/<slug>"
 ```
 
 3. The helper creates and validates:
@@ -57,12 +51,7 @@ Only minimal `project.json` and directories are created automatically. `/image-b
    - derived object count
    - whether world-level SFX exists
    - whether `scene.json` exists
-6. If source images now exist and `image.json` is missing, continue directly with the `/image-blast-uncover` workflow for no-cost image analysis and object directory creation.
-   If no source images exist and the user needs to add images, open the staging folder before asking them to drop files there:
-
-```bash
-node .claude/scripts/project/show-folder.mjs input
-```
+6. If source images now exist and `image.json` is missing, continue directly with the `/image-blast-uncover` workflow for no-cost image analysis and object directory creation. If no source images exist and the user needs to add images, report the `input/` path and ask them to add files there.
 
 7. Recommend downstream actions only after no-cost setup/analysis is complete, in this order:
    - `Agent(image-blast-plate)` for clean plate/source cleanup after object confirmation, when requested or one-shotting

@@ -55,7 +55,7 @@ export interface WorldObjectAsset {
 }
 
 export type Vec3Tuple = [number, number, number]
-export type WorldObjectPhysics = 'rigidbody' | 'static'
+export type WorldObjectPhysics = 'rigidbody' | 'static' | 'ghost'
 
 export interface WorldObjectPlacement {
   instanceId: string
@@ -79,6 +79,9 @@ export interface WorldSceneProject {
   sun?: WorldSceneSun
   metricScaleFactor?: number
   groundPlaneOffset?: number
+  groundPlaneColliderEnabled?: boolean
+  shadowCatcherOpacity?: number
+  shadowCatcherColor?: string
 }
 
 export interface WorldVersion {

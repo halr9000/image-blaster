@@ -15,6 +15,7 @@ import { PlacementEditorOverlay, PlacementEditorScene, usePlacementEditor } from
 import { OriginHelper } from '../modules/scene/OriginHelper'
 import { AudioManager } from '../modules/audio/AudioManager'
 import { PostProcessing } from '../modules/postprocessing/PostProcessing'
+import { DEFAULT_SHADOW_CATCHER_COLOR, DEFAULT_SHADOW_CATCHER_OPACITY, shadowCatcherColor, shadowCatcherOpacity } from '../modules/scene/shadows'
 import { getSplatUrl } from '../utils/worldLoader'
 import { useDebugStore } from '../store/debug'
 import { WorldRenderMode, ObjectRenderMode, ViewerQuality, type Vec3Tuple, type World, type WorldHoverPreview, type WorldObjectAsset, type WorldSceneProject } from '../types/world'
@@ -198,6 +199,16 @@ export function WorldViewer({
   const activeGroundPlaneOffset = editing
     ? placementEditor.groundPlaneOffset
     : sceneProject?.groundPlaneOffset ?? defaultGroundPlaneOffset
+  const sceneGroundPlaneColliderEnabled = editing
+    ? placementEditor.groundPlaneColliderEnabled
+    : sceneProject?.groundPlaneColliderEnabled ?? true
+  const activeGroundPlaneColliderEnabled = worldRenderMode === WorldRenderMode.ObjectOnly
+    ? true
+    : sceneGroundPlaneColliderEnabled
+  const sceneShadowCatcherOpacity = editing ? placementEditor.shadowCatcherOpacity : sceneProject?.shadowCatcherOpacity
+  const activeShadowCatcherOpacity = shadowCatcherOpacity(sceneShadowCatcherOpacity ?? DEFAULT_SHADOW_CATCHER_OPACITY)
+  const sceneShadowCatcherColor = editing ? placementEditor.shadowCatcherColor : sceneProject?.shadowCatcherColor
+  const activeShadowCatcherColor = shadowCatcherColor(sceneShadowCatcherColor ?? DEFAULT_SHADOW_CATCHER_COLOR)
   const objectPlacements = sceneProject?.instances ?? placementEditor.instances
   const objectPhysicsAssets = sceneProject?.instances.length ? allObjectAssets : desiredObjectAssets
   const activeControllerMode = editing ? 'fly' : controllerMode
@@ -238,7 +249,8 @@ export function WorldViewer({
                     flipY={flipY}
                     groundPlaneOffset={activeGroundPlaneOffset}
                     metricScaleFactor={activeMetricScaleFactor}
-                    sunIntensity={activeSunIntensity}
+                    shadowOpacity={activeShadowCatcherOpacity}
+                    shadowColor={activeShadowCatcherColor}
                   />
                 </Suspense>
               </OptionalAssetBoundary>
@@ -248,8 +260,6 @@ export function WorldViewer({
                 <ObjectGrid
                   objects={objectPhysicsAssets}
                   placements={objectPlacements}
-                  hoveredObjectAssetId={hoveredObjectAssetId}
-                  hoveredObjectInstanceId={hoveredObjectInstanceId}
                 />
               </Suspense>
             )}
@@ -258,7 +268,9 @@ export function WorldViewer({
                 <PlacementEditorScene controller={placementEditor} renderMode={objectRenderMode} />
               </Suspense>
             )}
-            <GroundPlane sunIntensity={activeSunIntensity} />
+            <GroundPlane
+              groundColliderEnabled={activeGroundPlaneColliderEnabled}
+            />
           </Physics>
           {splatUrl && (
             <OptionalAssetBoundary label={splatUrl} resetKey={splatUrl}>
@@ -357,7 +369,6 @@ function SourceImageControls({
               className="block h-96 aspect-square object-cover"
               draggable={false}
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/30" />
             <div className="absolute bottom-0.5 right-0.5 flex items-center gap-1">
               {import.meta.env.DEV && onRefreshWorlds && (
                 <RefreshWorldsButton
