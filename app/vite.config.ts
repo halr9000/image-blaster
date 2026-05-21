@@ -863,6 +863,7 @@ function worldsPlugin(): Plugin {
 }
 
 export default defineConfig({
+  base: '/image-blaster/',
   plugins: [react(), worldsPlugin()],
   server: { fs: { allow: ['..'] } },
 })
