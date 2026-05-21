@@ -1,60 +1,87 @@
-<img width="960" height="540" alt="image-blaster-1" src="https://github.com/user-attachments/assets/d294e420-eb48-4f00-b6a8-13005442d1a8" />
+# image-blaster
 
-## `image-blaster`
-Creates 3D environments, SFX, and meshes from a single image using Claude skills, World Labs, and FAL. 
+Creates 3D environments, SFX, and meshes from a single image.
 
-Can take you from an image to a fully meshed 3D environment in < 5 minutes, great for jumpstarting 3D work. Go full blast.
+Provide an image → get back a Gaussian splat environment (`.spz`), textured 3D object meshes (`.glb`), and ambient + per-object sound effects (`.mp3`) in under 5 minutes.
 
+> **Upstream:** Forked from [neilsonnn/image-blaster](https://github.com/neilsonnn/image-blaster). This fork adapts the project for use as an [OpenClaw](https://openclaw.dev) skill, with agent-harness specifics moved outside the project tree. The core generation scripts are unchanged.
 
-## Quickstart
+---
 
-1. Open a Terminal, enter `git clone https://github.com/neilsonnn/image-blaster`
-2. Enter the directory with `cd image-blaster`
-3. Run `claude` (install with `curl -fsSL https://claude.ai/install.sh | bash`)
-4. Say hello to Claude, and give them your API key for [World Labs](https://platform.worldlabs.ai/) and [FAL](https://fal.ai/).
-5. Put an image into `input/` directory and ask Claude to `blast it and confirm each step with me`.
+## Requirements
 
-### Description
+- [Bun](https://bun.sh) — script runtime
+- `WORLD_LABS_API_KEY` — [platform.worldlabs.ai](https://platform.worldlabs.ai/)
+- `FAL_KEY` — [fal.ai](https://fal.ai/)
 
-By default `image-blaster` will use your input image to create:
+## Quick Setup
 
-1. 3D models (`.glb`, `.obj`) of all *dynamic* objects
-2. Gaussian splat (`.spz`) of the *static* environment,
-3. Ambient looping sound and object specific physics SFX (`.mp3`)
+```bash
+git clone https://github.com/halr9000/image-blaster
+cd image-blaster
+bun install
+cp .env.example .env   # fill in your keys
+```
 
-### Extensions
+Drop an image into `input/` and run the generation pipeline using your agent or directly via the scripts in `scripts/`.
 
-You can embed `image-blaster` under the assets of *any game engine, DCC software, or web app*.
+## Directory Layout
 
-1. Unity, Unreal, or Godot game engine
-2. Blender, 3DS Max, or Maya or other DCC software
-3. Three.js web app or Electron app
+```
+input/          # drop source images here
+worlds/
+  <slug>/
+    project.json
+    image.json
+    source/       # staged source images and per-image analysis JSON
+    output/
+      world/      # .spz, .glb, panorama, thumbnail
+      sfx/        # ambient loop .mp3
+      <object>/   # per-object .glb, impact SFX
+app/            # Vite/React asset viewer (bun run dev → port 5173)
+scripts/        # generation scripts (world, 3D, SFX, image-edit, FAL)
+docs/           # project conventions and generation rules
+```
 
-## Advanced
+## Generation Models
 
-IMAGE-BLASTER uses a few generation models:
+| Asset | Provider | Model |
+|---|---|---|
+| Environment | World Labs | `marble-1.1` |
+| 3D objects | FAL → Hunyuan | `hunyuan-3d` |
+| Image editing / clean plates | FAL | `nano-banana` or `gpt-image-2` |
+| Sound effects | FAL → ElevenLabs | `elevenlabs-sfx` |
 
-- `marble-1.1` - World Labs Marble model creates the explorable environment.
-- `nano-banana` - default image edit preference for source cleanup, clean plates, and object reference images.
-- `gpt-image-2` - alternate image edit provider when the edit skill is asked to prefer it.
-- `hunyuan-3d` - Hunyuan 3D model creates 3D object models through FAL.
-- `elevenlabs-sfx` - ElevenLabs sound effects model creates ambient and object-specific sounds.
+## Scripts
 
-3D model creation supports these Hunyuan parameters:
+All scripts in `scripts/` are synchronous — they block until complete and print results to stdout. Set `WORLD_LABS_API_KEY` and `FAL_KEY` in env or `.env`.
 
-- `--face-count <40000-1500000>`: target face count. IMAGE-BLASTER defaults to `50000`; Hunyuan's API default is `500000`.
-- `--enable-pbr true|false`: enable PBR material generation. Defaults to `true`.
-- `--generate-type Normal|LowPoly|Geometry`: `Normal` creates a textured model, `LowPoly` applies polygon reduction, and `Geometry` creates a white geometry-only model. Defaults to `Normal`.
-- `--polygon-type triangle|quadrilateral`: polygon type for `LowPoly`. Defaults to `triangle`.
+```bash
+# Generate a world from a source image
+node scripts/world/generate-world.mjs --world <slug> --prompt "<empty environment caption>"
 
-### Examples
+# Generate a 3D object
+node scripts/asset-pipeline/generate-single-asset.mjs --world <slug> --object-id <id> --image-edit-prompt "<prompt>"
 
-- Video game level concepts? `IMAGE-BLAST` it.
-- Your childhood bedroom? `IMAGE-BLAST` it.
-- Need an environment for a robot? `IMAGE-BLAST` it.
-- A film location scout? `IMAGE-BLAST` it.
-- An architectural rendering? `IMAGE-BLAST` it.
+# Generate SFX
+node scripts/sfx/fal-elevenlabs-sfx.mjs --prompt "<sound>" --output-dir worlds/<slug>/output/sfx --prefix ambient-loop --count 2 --kind world-ambience --duration-seconds 10 --loop --postprocess true
 
-### Development
+# Generate a clean plate (remove objects from source image)
+node scripts/image-edit/generate-edit.mjs --image <path> --prompt "<removal prompt>" --output-dir worlds/<slug>/source --role plate --output-slug <slug>-plate
+```
 
-- remove `/app` from the `.claudeignore` file to give Claude the ability to change the React viewer.
+## Asset Viewer
+
+```bash
+bun run dev   # starts Vite dev server on port 5173
+```
+
+The viewer loads assets from local `worlds/` paths only — provider URLs in JSON sidecars are provenance metadata, not load targets.
+
+## Using with OpenClaw
+
+OpenClaw skill files and BWS secret integration are maintained separately at the OpenClaw workspace level and are not part of this repository. See your OpenClaw skills directory for `image-blaster` orchestration skills.
+
+## License
+
+See `LICENSE.md`. Upstream work by [@neilsonnn](https://github.com/neilsonnn).
