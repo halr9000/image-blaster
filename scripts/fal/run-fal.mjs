@@ -266,7 +266,7 @@ async function main() {
 
   if (!endpoint || !outputDir) {
     throw new Error(
-      "Usage: node .claude/scripts/fal/run-fal.mjs --endpoint <fal/model> --input-json '<json>' --output-dir <dir> [--output-slug <slug>]"
+      "Usage: node scripts/fal/run-fal.mjs --endpoint <fal/model> --input-json '<json>' --output-dir <dir> [--output-slug <slug>]"
     );
   }
 

@@ -19,7 +19,7 @@ import {
 const ALLOWED_ROOTS = ["worlds", "input"];
 
 function usage() {
-  return "Usage: node .claude/scripts/project/ensure-local-assets.mjs --from <world-json-or-request-json> [--force] [--dry-run]";
+  return "Usage: node scripts/project/ensure-local-assets.mjs --from <world-json-or-request-json> [--force] [--dry-run]";
 }
 
 function extensionFromUrl(url, fallback) {

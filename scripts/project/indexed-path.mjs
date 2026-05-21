@@ -13,11 +13,11 @@ import {
 
 function usage() {
   return [
-    "Usage: node .claude/scripts/project/indexed-path.mjs --dir <dir> --slug <slug> (--ext <ext> | --request) (--index N | --next | --latest) [--scope <role>]",
+    "Usage: node scripts/project/indexed-path.mjs --dir <dir> --slug <slug> (--ext <ext> | --request) (--index N | --next | --latest) [--scope <role>]",
     "",
     "Examples:",
-    "  node .claude/scripts/project/indexed-path.mjs --dir worlds/demo/output/world --slug world --ext .glb --next",
-    "  node .claude/scripts/project/indexed-path.mjs --dir worlds/demo/output/chair --slug chair --request --index 0 --scope model"
+    "  node scripts/project/indexed-path.mjs --dir worlds/demo/output/world --slug world --ext .glb --next",
+    "  node scripts/project/indexed-path.mjs --dir worlds/demo/output/chair --slug chair --request --index 0 --scope model"
   ].join("\n");
 }
 

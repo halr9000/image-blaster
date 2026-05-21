@@ -11,7 +11,7 @@ import {
 const ALLOWED_ROOTS = ["worlds", "input"];
 
 function usage() {
-  return "Usage: node .claude/scripts/project/download.mjs --url <url-or-data-uri> --out <path> [--force] [--dry-run]";
+  return "Usage: node scripts/project/download.mjs --url <url-or-data-uri> --out <path> [--force] [--dry-run]";
 }
 
 function resolveProjectPath(value) {

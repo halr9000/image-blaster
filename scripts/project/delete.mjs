@@ -10,7 +10,7 @@ import {
 const ALLOWED_ROOTS = ["worlds", "input"];
 
 function usage() {
-  return "Usage: node .claude/scripts/project/delete.mjs --path <path> [--yes] [--recursive]";
+  return "Usage: node scripts/project/delete.mjs --path <path> [--yes] [--recursive]";
 }
 
 function resolveProjectPath(value) {
@@ -46,7 +46,7 @@ async function main() {
       action: "dry-run",
       path: relative,
       recursive,
-      next: `node .claude/scripts/project/delete.mjs --path ${JSON.stringify(relative)} --yes${recursive ? " --recursive" : ""}`
+      next: `node scripts/project/delete.mjs --path ${JSON.stringify(relative)} --yes${recursive ? " --recursive" : ""}`
     }, null, 2));
     return;
   }
